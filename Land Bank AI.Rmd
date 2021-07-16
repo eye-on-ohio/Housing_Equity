@@ -1,0 +1,444 @@
+---
+title: "Land Bank AI"
+author: "Lucia Walinchus"
+date: "Summer 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(rio)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(DT)
+library(ggmap)
+#devtools::install_github('hansthompson/rusps')
+library(rusps)
+library(XML)
+username <- '256OHIOC5825'
+library(purrr)
+
+```
+
+
+
+We got this from a FOIA from the Cuyahoga County Fiscal Office
+
+```{r cars}
+TransferHistory <- rio::import("TRANSFER_HISTORY_CUYAHOGA_COUNTY.txt") # Warning, after you start this, you whould probably go to lunch. This takes a ridiculously long time to load. 
+```
+
+Oh boy ~2.8 million transfers! 
+
+```{r pressure, echo=FALSE}
+#Date is a Character, and we need the recorded date as a date
+TransferHistory$Date_Recorded <- dmy(TransferHistory$RECORDED_DATE)
+
+```
+
+County Land Banks (not to be confused with city land banks) have only been around though since 2009, and so we will only need that. 
+
+For reference- SB 353 analysis by the Legislative Service Commission: https://www.lsc.ohio.gov/documents/gaDocuments/analyses127/08-sb353-127.pdf
+
+_"Authorizes  a  county  with  a  population  exceeding  1.2  million  to  form,  within  one  year  of  the  act's  effective  date,  a  county  land  reutilization  corporation   (CLRC),   a   nonprofit   corporation,   for   the   purposes   of   promoting  development  and  managing  and  facilitating  the  reclamation,  rehabilitation,  and  reutilization  of  vacant,  abandoned,  tax-foreclosed,  or  other real property."_
+And the effective date is April 7, 2009.
+
+[Side note, really weird, the date function reads "68" as 2068" not "1968." For our purposes, we are only going to look at county land banks, as city land banks don't really get the party started.And that doesn't happen until 2009. But that's why there are several errors that come up as dated in the future.]
+
+
+```{r}
+Transfer_History_Post_April09 <-filter(TransferHistory, Date_Recorded>"2009-04-06")
+rm(TransferHistory)# To give your computer memory a break
+```
+
+How many properties are going to and from land banks?
+
+Going TO landbanks
+```{r}
+Land_Bank_Transfers <- Transfer_History_Post_April09 %>% 
+  filter(str_detect(GRANTEE1, "land bank|LAND BANK|REUTILIZATION|Reutilization"))
+summary(Land_Bank_Transfers)
+```
+From Land banks to others. (Note City and County have many between them.)
+```{r}
+Land_Bank_Recipients <- Transfer_History_Post_April09 %>% 
+  filter(str_detect(GRANTOR1, "land bank|LAND BANK|REUTILIZATION|Reutilization"))
+summary(Land_Bank_Recipients)
+```
+
+
+How did Covid affect transfers? 
+```{r}
+Land_Bank_Transfers %>% 
+  count(year(Date_Recorded))
+```
+
+Looks like transfers TO landbanks only happened once in 2020. So as suspected, Covid froze things. 
+
+```{r}
+Land_Bank_Recipients %>% 
+  count(year(Date_Recorded))
+```
+
+And again, almost a complete stop. So 2020 will not work for our purposes. 
+
+
+
+
+
+
+
+
+
+Which have the most value? 
+
+```{r}
+#Land_Bank_Transfers$Market_value = Cuyahoga_Tax$TAX_MARKET_TOTAL[match(Land_Bank_Transfers$PROPERTY_NUMBER, Cuyahoga_Tax$PROPERTY_NUMBER)]
+```
+
+
+
+
+
+Who got the most land bank transfers? 
+
+```{r}
+Largest_Land_Bank_Recipients <- Land_Bank_Recipients %>% 
+  group_by(GRANTEE1) %>% 
+  summarize(Total=n())
+
+datatable(Largest_Land_Bank_Recipients)
+
+
+
+
+```
+
+
+
+
+
+How many properties went from one to another? 
+
+Note: we can't just look for stuff with "Land" in it since "land" is in "Cleveland."
+
+
+```{r}
+To_and_from_Land_Banks <- rbind(Land_Bank_Recipients, Land_Bank_Transfers) %>% 
+  filter(str_detect(GRANTEE1, "land bank|LAND BANK|REUTILIZATION|Reutilization") & str_detect(GRANTOR1, "land bank|LAND BANK|REUTILIZATION|Reutilization")) %>% 
+  distinct()
+  
+
+
+```
+
+
+These are the properties that went from one land bank to another. This is pretty common as county land banks came later and had more control over things. 
+
+```{r}
+Properties_That_Switched_Land_Banks <- Transfer_History_Post_April09 %>% 
+  filter(PROPERTY_NUMBER %in% To_and_from_Land_Banks$PROPERTY_NUMBER)
+
+```
+
+
+Where exactly are these properties? First, let's bring in our parcel listing. 
+
+```{r}
+Cuyahoga_Properties <- rio::import("CUYAHOGA_PARCELLISTING_2019.csv")
+```
+This is the 2019 parcels- 525,335 total. 
+
+
+Looking for duplicates: 
+
+```{r}
+
+Cuyahoga_Dups <- Cuyahoga_Properties %>% 
+  group_by(PARCEL_ID) %>% 
+  summarize(Total=n()) 
+  
+
+datatable(Cuyahoga_Dups)
+
+```
+
+Yay they are all unique.
+
+```{r}
+
+Land_Bank_Dups <- Land_Bank_Transfers %>% 
+  group_by(PARCEL_ID) %>% 
+  summarize(Total=n()) 
+  
+
+datatable(Land_Bank_Dups)
+
+```
+
+Some parcels went to the land bank multiple times. Or were transferred between land banks. So for our purposes, we want to make sure they only come up once. 
+
+```{r}
+Land_Bank_Unique  <- Land_Bank_Transfers %>% 
+  distinct(PARCEL_ID, .keep_all = TRUE)
+```
+
+
+
+
+
+Now we want to see how many of those properties were added by the land bank. 
+
+```{r}
+Cuyahoga_data <- merge(Cuyahoga_Properties, Land_Bank_Unique, by = "PARCEL_ID", all.x = TRUE, all.y = TRUE)
+```
+
+
+Here's a challenge: the *property* address isn't always the *mailing* address. If you rent out the property, or the resident has someone who is elderly and someone else needs to pay their bills, etc. So we have to be careful to geocode the _property_ address. 
+
+Second challenge: Some of these properties were demolished such as parcel number 015-06-060 which went through the land bank, was demolished, and now that property doesn't exist. 
+
+
+```{r}
+Cuyahoga_demolished <- Cuyahoga_data %>% 
+  filter(is.na(PROPERTY_NUMBER.x))
+
+```
+
+
+So we will have to find an address for these by hand. 
+
+Now we need to create an address column.
+
+```{r}
+Cuyahoga_data <- Cuyahoga_data %>% 
+  mutate(address=paste(PAR_ADDR_NO,PAR_DIR,PAR_STREET,PAR_ST_SUFFX,CITY_NAME,"OH")) #Note we are not putting the unit in here because we don't need it. For  our purposes, each apartment buliding is one address. 
+```
+
+
+Okay so each property can have more than one parcel. We want to ONLY flag each address. And only flag that address once. 
+
+```{r}
+Cuyahoga_Addresses <- Cuyahoga_data %>% 
+  distinct(address, .keep_all = TRUE)
+```
+
+
+And now we geocode: 
+
+First, we have to chunk this: 
+Formula to chunk:
+```{r}
+
+chunk <- function(Yo.data){ 
+   x = 0
+   y = 1
+  while (x < 470728){
+    paste0(Yo.data,y) <- Yo.data %>%
+    select(Yo.data$PARCEL_ID,Yo.data$PAR_ADDR_NO,Yo.data$PAR_DIR,Yo.data$PAR_STREET,Yo.data$PAR_ST_SUFFX,Yo.data$CITY_NAME) %>% 
+    filter(row_number()>x&row_number()<=(x+5000))
+      x = x +5000
+      y = y +1
+    }
+  }
+
+```
+
+```{r}
+
+chunk <- function(Yo.data, x, y){ Yo.data %>% 
+  while (x < 470728){
+    paste0(Yo.data,y) =  
+    select(Yo.data$PARCEL_ID,Yo.data$PAR_ADDR_NO,Yo.data$PAR_DIR,Yo.data$PAR_STREET,Yo.data$PAR_ST_SUFFX,Yo.data$CITY_NAME) %>% 
+    filter(row_number()>x&row_number()<=(x+5000))
+      x = x +5000
+      y = y +1
+    }
+  }
+
+```
+
+
+
+Filtering down
+
+```{r}
+Cuyahoga_Just_Addresses <- Cuyahoga_Addresses %>% 
+  select(PARCEL_ID,PAR_ADDR_NO,PAR_DIR,PAR_STREET,PAR_ST_SUFFX,CITY_NAME)
+```
+And splitting them
+```{r}
+Cuyahoga_Just_Addresses$group <- 1:470728 %% 95 +1
+Address_list <- split(Cuyahoga_Just_Addresses, Cuyahoga_Just_Addresses$group)
+names(Address_list) <- paste0("C",1:95)
+
+```
+
+And export them
+```{r}
+setwd("~/Code/Blue/Housing_Equity/Spliced")
+x <- data.frame(as.character(1:95))
+
+save_spliced <- function(y){
+  rio::export(paste0("Address_list$C",y),paste0("Cuyahoga_Addresses",y,".csv"))
+}
+map_chr(x, save_spliced)
+```
+
+
+
+
+```{r}
+
+```
+
+
+
+Cuyahoga_Addresses1 <- Cuyahoga_Addresses %>% 
+  select(PARCEL_ID,address) %>% 
+  filter(row_number()<=10)
+
+Cuyahoga_Addresses_test <- list(validate_address_usps(street =  paste(Cuyahoga_Addresses1$PAR_ADDR_NO,Cuyahoga_Addresses1$PAR_DIR,Cuyahoga_Addresses1$PAR_STREET,Cuyahoga_Addresses1$PAR_ST_SUFFX),
+                                             city = Cuyahoga_Addresses1$CITY_NAME,
+                                             state = "OH",
+                                             username = username))
+
+
+
+Cuyahoga_Addresses1 <- validate_address_usps("256OHIOC5825", paste(Cuyahoga_Addresses1$PAR_ADDR_NO,Cuyahoga_Addresses1$PAR_DIR,Cuyahoga_Addresses1$PAR_STREET,Cuyahoga_Addresses1$PAR_ST_SUFFX),Cuyahoga_Addresses1$CITY_NAME, "OH")
+
+
+
+
+Cuyahoga_Addresses2 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>50000&row_number()<=100000)
+Cuyahoga_Addresses3 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>100000&row_number()<=150000)
+Cuyahoga_Addresses4 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>150000&row_number()<=200000)
+Cuyahoga_Addresses5 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>200000&row_number()<=250000)
+Cuyahoga_Addresses6 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>250000&row_number()<=300000)
+Cuyahoga_Addresses7 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>300000&row_number()<=350000)
+Cuyahoga_Addresses8 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>350000&row_number()<=400000)
+Cuyahoga_Addresses9 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>400000&row_number()<=450000)
+Cuyahoga_Addresses10 <- Cuyahoga_Addresses %>% 
+  filter(row_number()>450000&row_number()<=500000)
+
+
+
+
+
+rio::export(Cuyahoga_Addresses1, "Cuyahoga_Addresses1.csv")
+rio::export(Cuyahoga_Addresses2, "Cuyahoga_Addresses2.csv")
+rio::export(Cuyahoga_Addresses3, "Cuyahoga_Addresses3.csv")
+rio::export(Cuyahoga_Addresses4, "Cuyahoga_Addresses4.csv")
+rio::export(Cuyahoga_Addresses5, "Cuyahoga_Addresses5.csv")
+rio::export(Cuyahoga_Addresses6, "Cuyahoga_Addresses6.csv")
+rio::export(Cuyahoga_Addresses7, "Cuyahoga_Addresses7.csv")
+rio::export(Cuyahoga_Addresses8, "Cuyahoga_Addresses8.csv")
+rio::export(Cuyahoga_Addresses9, "Cuyahoga_Addresses9.csv")
+rio::export(Cuyahoga_Addresses10, "Cuyahoga_Addresses10.csv")
+```
+
+
+
+
+rio::export(Cuyahoga_Addresses1, "Cuyahoga_Addresses1.csv")
+> rio::export(Cuyahoga_Addresses2, "Cuyahoga_Addresses2.csv")
+> rio::export(Cuyahoga_Addresses3, "Cuyahoga_Addresses3.csv")
+> rio::export(Cuyahoga_Addresses4, "Cuyahoga_Addresses4.csv")
+> rio::export(Cuyahoga_Addresses5, "Cuyahoga_Addresses5.csv")
+> rio::export(Cuyahoga_Addresses6, "Cuyahoga_Addresses6.csv")
+> rio::export(Cuyahoga_Addresses7, "Cuyahoga_Addresses7.csv")
+> rio::export(Cuyahoga_Addresses8, "Cuyahoga_Addresses8.csv")
+> rio::export(Cuyahoga_Addresses9, "Cuyahoga_Addresses9.csv")
+> rio::export(Cuyahoga_Addresses10, "Cuyahoga_Addresses10.csv")
+
+
+
+Cuyahoga_Addresses1 <- Cuyahoga_Addresses %>% 
+  filter(row_number()<=49999)```{r}
+#Cuyahoga_Addresses_With_Geocode <- mutate_geocode(Cuyahoga_Addresses,address)
+
+```
+
+
+
+
+
+
+
+This is geting to be a big file, though, so we want to take out some columns we don't need. 
+
+```{r}
+Cuyahoga_data <- Cuyahoga_data %>% 
+  select("PARCEL_ID",                   "PROPERTY_NUMBER.x",            "CITY_NAME",                    "SCHOOL_DIST_NAME",            
+"TAX_SET",                      "TAX_DIST_NAME",                "DEEDED_OWNER",                 "PAR_ADDR_NO",                 
+"PAR_DIR",                      "PAR_STREET",                  "PAR_ST_SUFFX",                 "PAR_UNIT",                    
+ "PROP_CLASS",  "EXT_LUC", "EXT_LUC_DESCRIPTION",         
+"APPRAISAL_NEIGHBORHOOD"       "PCL_AREA"                     "TWO_HALF_CREDIT"              "HOMESTEAD_CREDIT"            
+ [33] "ROLLBACK_CREDIT"              "FORECLOSURE_FLAG"             "TAX_YEAR"                     "CERT_TOT"                    
+ [37] "CERT_BLD"                     "CERT_LND"                     "CERT_TAX_TOT"                 "CERT_TAX_BLD"                
+ [41] "CERT_TAX_LND"                 "CERT_EXT_TOT"                 "CERT_EXT_BLD"                 "CERT_EXT_LND"                
+ [45] "CERT_ABT_TOT"                 "CERT_ABT_BLD"                 "CERT_ABT_LND"                 "ASSD_TAX_TOT"                
+ [49] "ASSD_TAX_BLD"                 "ASSD_TAX_LND"                 "ASSD_EXT_TOT"                 "ASSD_EXT_BLD"                
+ [53] "ASSD_EXT_LND"                 "ASSD_ABT_TOT"                 "ASSD_ABT_BLD"                 "ASSD_ABT_LND"                
+ [57] "RUN_DATE"                     "TRANSFER_TO_ID"               "WHS_ID"                       "TRANSFER_HISTORY_ID"         
+ [61] "TRANSFER_ORDER"               "PROPERTY_NUMBER.y"            "GRANTEE1"                     "GRANTOR1"                    
+ [65] "TRANSFER_DATE"                "SALES_AMOUNT"                 "DEED_TYPE"                    "INSTRUMENT_NUMBER"           
+ [69] "RECORDED_BOOK"                "RECORDED_PAGE"                "INSTRUMENT_TYPE"              "SALE_VALID"                  
+ [73] "MULTIPROPERTY_SALE"           "NUMBER_OF_PROPERTIES_IN_SALE" "CONVEYANCE_NUMBER"            "CONVEYANCE_FEE"              
+ [77] "USER_ID"                      "RECEIPT_NUMBER"               "AUTO_FILE_NUMBER"             "CHANGE_TIMESTAMP"            
+ [81] "TRANSFER_NUMBER"              "TRANSFER_STATUS"              "MONTH_OF_SALE"                "YEAR_OF_SALE"                
+ [85] "CAMA_SALE_FILE"               "CAMA_INV_FILE"                "TRANSFER_TYPE"                "INSTRUMENT_DATE"             
+ [89] "RECORDED_DATE"                "TRANSFER_FEE"                 "PERMISSIVE_FEE"               "AMOUNT_PAID"                 
+ [93] "FEE_PAID_BY"                  "FEE_CHECK_NUM"                "SALES_SOURCE"                 "DEED_NUMBER"                 
+ [97] "EXEMPTCODE"                   "ASSUMED_LOAN_AMOUNT"          "PERSONAL_PROPERTY_AMOUNT"     "BUILDINGS_ON_LAND"           
+[101] "GIFT"                         "LAND_CONTRACT"                "LEASED_FEE"                   "LEASE_HOLD"                  
+[105] "LIFE_ESTATE"                  "MINERAL_RIGHTS_RESERVED"      "MOTHER"                       "PARTINTER_EST_TRANSFERRED"   
+[109] "GRANTOR_IS_MORTGAGEE"         "GRANTOR_IS_RELATIVE"          "TRADE"                        "TRANSFER_TYPE_DESCR"         
+[113] "SALES_SOURCE_DESCR"           "EXEMPTCODE_DESCR"             "TRANSFER_FROM_PARCEL"         "UPDATE_DATE"                 
+[117] "Date_Recorded"               
+```
+
+
+
+
+
+
+Let's geolocate
+
+Instead of Google Maps, which works wonderfully in R but is awfully expensive, we will be using the [Decentralized Geomarker Assessment for Multi-Site Studies](https://degauss.org/)
+
+Here is the required cite:
+    _Cole Brokamp, Chris Wolfe, Todd Lingren, John Harley, Patrick Ryan. Decentralized and Reproducible Geocoding and Characterization of Community and Environmental Exposures for Multi-Site Studies. Journal of American Medical Informatics Association. 25(3). 309-314. 2018. [Download.](https://colebrokamp-website.s3.amazonaws.com/publications/Brokamp_JAMIA_2017.pdf)
+    Cole Brokamp. DeGAUSS: Decentralized Geomarker Assessment for Multi-Site Studies. Journal of Open Source Software. 2018. [Download.](https://colebrokamp-website.s3.amazonaws.com/publications/Brokamp_JOSS_2018.pdf)_
+
+
+We need an address column named address for this to work so: 
+
+
+```{r}
+Cuyahoga_data <- Cuyahoga_data %>% 
+  mutate(address=
+```
+
+
+
+
+This is from the Ohio Department of Education. [There's no direct download link, you have to choose what you want.](https://reports.education.ohio.gov/report/report-card-data-district-enrollment-by-student-demographic)
+```{r}
+Cuyahoga_schools_demographic <- rio::import("report-card-data-district-enrollment-by-student-demographic - Demographic Overview - Enrollment by Race_Ethnicity.csv")
+```
+
+
+
+
+
+

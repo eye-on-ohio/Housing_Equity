@@ -6,18 +6,19 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-library(rio)
 library(dplyr)
 library(ggplot2)
 library(tidyverse)
 library(lubridate)
 library(DT)
 library(ggmap)
-#devtools::install_github('hansthompson/rusps')
-library(rusps)
 library(XML)
-username <- '256OHIOC5825'
 library(purrr)
+library(leaflet)
+library(sf)
+library(readxl)
+library(tidymodels)
+library(themis)
 
 ```
 
@@ -26,16 +27,19 @@ library(purrr)
 We got this from a FOIA from the Cuyahoga County Fiscal Office
 
 ```{r cars}
-TransferHistory <- rio::import("TRANSFER_HISTORY_CUYAHOGA_COUNTY.txt") # Warning, after you start this, you whould probably go to lunch. This takes a ridiculously long time to load. 
+TransferHistory <- rio::import("TRANSFER_HISTORY_CUYAHOGA_COUNTY.txt") # Warning, after you start this, you should probably go to lunch. This takes a ridiculously long time to load. 
 ```
 
 Oh boy ~2.8 million transfers! 
 
 ```{r pressure, echo=FALSE}
 #Date is a Character, and we need the recorded date as a date
-TransferHistory$Date_Recorded <- dmy(TransferHistory$RECORDED_DATE)
+TransferHistory$Transfer_date <- dmy(TransferHistory$TRANSFER_DATE)
 
 ```
+
+
+
 
 County Land Banks (not to be confused with city land banks) have only been around though since 2009, and so we will only need that. 
 
@@ -48,22 +52,86 @@ And the effective date is April 7, 2009.
 
 
 ```{r}
-Transfer_History_Post_April09 <-filter(TransferHistory, Date_Recorded>"2009-04-06")
+Transfer_History_Post_April09 <-filter(TransferHistory, Transfer_date>"2009-04-06")
 rm(TransferHistory)# To give your computer memory a break
 ```
 
-How many properties are going to and from land banks?
+
+
+Through  additional FOIAs:
+
+Note: we removed 16 listings of bad data. Which isn't bad for 48,852 transactions in 2020, but still not ideal.
+
+```{r}
+Cuyahoga2020 <- rio::import("ENTIRE COUNTY_SalesListing_2020_EntireYear.xlsx")
+
+
+setwd("~/Code/Blue/Housing_Equity/Cuyahoga 2021 Transfers/")
+
+list_of_files <- list.files(path = ".", recursive = TRUE,
+                            pattern = "\\.txt$", 
+                            full.names = TRUE)
+
+
+Cuyahoga2021 <- list_of_files %>%
+  purrr::set_names(nm = (basename(.) %>% tools::file_path_sans_ext())) %>%
+  purrr::map_df(read_csv, progress = show_progress())
+
+```
+
+Notes: 006-02-013 in 2020 had an error causing an extra column. This property is never taken over by the land bank so excluded for our purposes
+
+
+
+
+Putting them together and in the same format: 
+
+```{r}
+Cuyahoga2020_2021 <- rbind(Cuyahoga2020,Cuyahoga2021)
+
+Cuyahoga2020_2021 <- Cuyahoga2020_2021 %>% 
+  rename(PROPERTY_NUMBER=Parcel, 
+         Transfer_date=`Sale Date`,
+         GRANTOR1=Grantor,
+         GRANTEE1=Grantee,
+         DEED_TYPE=`Deed Type`,
+         AUTO_FILE_NUMBER=AFN) %>% 
+  select(PROPERTY_NUMBER, 
+         Transfer_date,
+         GRANTOR1,
+         GRANTEE1,
+         DEED_TYPE,
+         AUTO_FILE_NUMBER)
+
+
+Transfer_History_Post_April09 <- Transfer_History_Post_April09 %>% 
+  select(PROPERTY_NUMBER, 
+         Transfer_date,
+         GRANTOR1,
+         GRANTEE1,
+         DEED_TYPE,
+         AUTO_FILE_NUMBER) %>% 
+  rbind(Cuyahoga2020_2021)
+
+```
+
+
+
+
+
+
+How many properties are going to and from land banks? Or were forfeited to the state?
 
 Going TO landbanks
 ```{r}
 Land_Bank_Transfers <- Transfer_History_Post_April09 %>% 
-  filter(str_detect(GRANTEE1, "land bank|LAND BANK|REUTILIZATION|Reutilization"))
+  filter(str_detect(GRANTEE1, "land bank|LAND BANK|REUTILIZATION|Reutilization|FORF"))
 summary(Land_Bank_Transfers)
 ```
 From Land banks to others. (Note City and County have many between them.)
 ```{r}
 Land_Bank_Recipients <- Transfer_History_Post_April09 %>% 
-  filter(str_detect(GRANTOR1, "land bank|LAND BANK|REUTILIZATION|Reutilization"))
+  filter(str_detect(GRANTOR1, "land bank|LAND BANK|REUTILIZATION|Reutilization|FORF"))
 summary(Land_Bank_Recipients)
 ```
 
@@ -71,32 +139,15 @@ summary(Land_Bank_Recipients)
 How did Covid affect transfers? 
 ```{r}
 Land_Bank_Transfers %>% 
-  count(year(Date_Recorded))
+  count(year(Transfer_date))
 ```
 
-Looks like transfers TO landbanks only happened once in 2020. So as suspected, Covid froze things. 
+Fewer, also affected by litigation. 
 
 ```{r}
 Land_Bank_Recipients %>% 
-  count(year(Date_Recorded))
+  count(year(Transfer_date))
 ```
-
-And again, almost a complete stop. So 2020 will not work for our purposes. 
-
-
-
-
-
-
-
-
-
-Which have the most value? 
-
-```{r}
-#Land_Bank_Transfers$Market_value = Cuyahoga_Tax$TAX_MARKET_TOTAL[match(Land_Bank_Transfers$PROPERTY_NUMBER, Cuyahoga_Tax$PROPERTY_NUMBER)]
-```
-
 
 
 
@@ -109,8 +160,6 @@ Largest_Land_Bank_Recipients <- Land_Bank_Recipients %>%
   summarize(Total=n())
 
 datatable(Largest_Land_Bank_Recipients)
-
-
 
 
 ```
@@ -145,31 +194,12 @@ Properties_That_Switched_Land_Banks <- Transfer_History_Post_April09 %>%
 
 Where exactly are these properties? First, let's bring in our parcel listing. 
 
-```{r}
-Cuyahoga_Properties <- rio::import("CUYAHOGA_PARCELLISTING_2019.csv")
-```
-This is the 2019 parcels- 525,335 total. 
 
-
-Looking for duplicates: 
-
-```{r}
-
-Cuyahoga_Dups <- Cuyahoga_Properties %>% 
-  group_by(PARCEL_ID) %>% 
-  summarize(Total=n()) 
-  
-
-datatable(Cuyahoga_Dups)
-
-```
-
-Yay they are all unique.
-
+Getting unique land banks properties
 ```{r}
 
 Land_Bank_Dups <- Land_Bank_Transfers %>% 
-  group_by(PARCEL_ID) %>% 
+  group_by(PROPERTY_NUMBER) %>% 
   summarize(Total=n()) 
   
 
@@ -180,264 +210,759 @@ datatable(Land_Bank_Dups)
 Some parcels went to the land bank multiple times. Or were transferred between land banks. So for our purposes, we want to make sure they only come up once. 
 
 ```{r}
-Land_Bank_Unique  <- Land_Bank_Transfers %>% 
-  distinct(PARCEL_ID, .keep_all = TRUE)
+#Land_Bank_Unique  <- Land_Bank_Transfers %>% 
+ #distinct(PROPERTY_NUMBER, .keep_all = TRUE)
 ```
 
-
-
-
-
-Now we want to see how many of those properties were added by the land bank. 
+Now where are all these properties? 
+To locate them, we will need the list of all parcels, to match the IDs: 
 
 ```{r}
-Cuyahoga_data <- merge(Cuyahoga_Properties, Land_Bank_Unique, by = "PARCEL_ID", all.x = TRUE, all.y = TRUE)
+Cuyahoga_Properties <- rio::import("CUYAHOGA_PARCELLISTING_2019.csv") #also from a FOIA
 ```
 
-
-Here's a challenge: the *property* address isn't always the *mailing* address. If you rent out the property, or the resident has someone who is elderly and someone else needs to pay their bills, etc. So we have to be careful to geocode the _property_ address. 
-
-Second challenge: Some of these properties were demolished such as parcel number 015-06-060 which went through the land bank, was demolished, and now that property doesn't exist. 
-
+And we're going to merge them by the property number. Note the parcel id and property number are the same except the property number has dashes. 
 
 ```{r}
-Cuyahoga_demolished <- Cuyahoga_data %>% 
-  filter(is.na(PROPERTY_NUMBER.x))
-
+Cuyahoga_data <- left_join(Land_Bank_Transfers, Cuyahoga_Properties, by = "PROPERTY_NUMBER")
 ```
 
 
-So we will have to find an address for these by hand. 
+Here's a challenge: the *property* address isn't always the *mailing* address. 
 
-Now we need to create an address column.
-
-```{r}
-Cuyahoga_data <- Cuyahoga_data %>% 
-  mutate(address=paste(PAR_ADDR_NO,PAR_DIR,PAR_STREET,PAR_ST_SUFFX,CITY_NAME,"OH")) #Note we are not putting the unit in here because we don't need it. For  our purposes, each apartment buliding is one address. 
-```
-
-
-Okay so each property can have more than one parcel. We want to ONLY flag each address. And only flag that address once. 
-
-```{r}
-Cuyahoga_Addresses <- Cuyahoga_data %>% 
-  distinct(address, .keep_all = TRUE)
-```
-
-
-And now we geocode: 
-
-First, we have to chunk this: 
-Formula to chunk:
-```{r}
-
-chunk <- function(Yo.data){ 
-   x = 0
-   y = 1
-  while (x < 470728){
-    paste0(Yo.data,y) <- Yo.data %>%
-    select(Yo.data$PARCEL_ID,Yo.data$PAR_ADDR_NO,Yo.data$PAR_DIR,Yo.data$PAR_STREET,Yo.data$PAR_ST_SUFFX,Yo.data$CITY_NAME) %>% 
-    filter(row_number()>x&row_number()<=(x+5000))
-      x = x +5000
-      y = y +1
-    }
-  }
-
-```
-
-```{r}
-
-chunk <- function(Yo.data, x, y){ Yo.data %>% 
-  while (x < 470728){
-    paste0(Yo.data,y) =  
-    select(Yo.data$PARCEL_ID,Yo.data$PAR_ADDR_NO,Yo.data$PAR_DIR,Yo.data$PAR_STREET,Yo.data$PAR_ST_SUFFX,Yo.data$CITY_NAME) %>% 
-    filter(row_number()>x&row_number()<=(x+5000))
-      x = x +5000
-      y = y +1
-    }
-  }
-
-```
-
-
-
-Filtering down
-
-```{r}
-Cuyahoga_Just_Addresses <- Cuyahoga_Addresses %>% 
-  select(PARCEL_ID,PAR_ADDR_NO,PAR_DIR,PAR_STREET,PAR_ST_SUFFX,CITY_NAME)
-```
-And splitting them
-```{r}
-Cuyahoga_Just_Addresses$group <- 1:470728 %% 95 +1
-Address_list <- split(Cuyahoga_Just_Addresses, Cuyahoga_Just_Addresses$group)
-names(Address_list) <- paste0("C",1:95)
-
-```
-
-And export them
-```{r}
-setwd("~/Code/Blue/Housing_Equity/Spliced")
-x <- data.frame(as.character(1:95))
-
-save_spliced <- function(y){
-  rio::export(paste0("Address_list$C",y),paste0("Cuyahoga_Addresses",y,".csv"))
-}
-map_chr(x, save_spliced)
-```
-
-
+Second challenge: Some of these properties were demolished such as parcel number 015-06-060 which went through the land bank, was demolished, and now that property doesn't exist. So there is no property number. This is actually exactly what land banks are supposed to do! But this makes our job a lot harder. 
 
 
 ```{r}
+#Cuyahoga_demolished <- Cuyahoga_data %>% 
+  #filter(is.na(PROPERTY_NUMBER.x))
 
 ```
+Not in the code: We found each address by hand. 
+![This involved going through hundreds of old property records, maps, and approximating where these properties were located.]("example of going through property photos- Cuyahoga.png")
 
+In addition, there are approximately with 1,937 parcels with a property number that still exists but with no address. These are empty lots. 
 
-
-Cuyahoga_Addresses1 <- Cuyahoga_Addresses %>% 
-  select(PARCEL_ID,address) %>% 
-  filter(row_number()<=10)
-
-Cuyahoga_Addresses_test <- list(validate_address_usps(street =  paste(Cuyahoga_Addresses1$PAR_ADDR_NO,Cuyahoga_Addresses1$PAR_DIR,Cuyahoga_Addresses1$PAR_STREET,Cuyahoga_Addresses1$PAR_ST_SUFFX),
-                                             city = Cuyahoga_Addresses1$CITY_NAME,
-                                             state = "OH",
-                                             username = username))
-
-
-
-Cuyahoga_Addresses1 <- validate_address_usps("256OHIOC5825", paste(Cuyahoga_Addresses1$PAR_ADDR_NO,Cuyahoga_Addresses1$PAR_DIR,Cuyahoga_Addresses1$PAR_STREET,Cuyahoga_Addresses1$PAR_ST_SUFFX),Cuyahoga_Addresses1$CITY_NAME, "OH")
-
-
-
-
-Cuyahoga_Addresses2 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>50000&row_number()<=100000)
-Cuyahoga_Addresses3 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>100000&row_number()<=150000)
-Cuyahoga_Addresses4 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>150000&row_number()<=200000)
-Cuyahoga_Addresses5 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>200000&row_number()<=250000)
-Cuyahoga_Addresses6 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>250000&row_number()<=300000)
-Cuyahoga_Addresses7 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>300000&row_number()<=350000)
-Cuyahoga_Addresses8 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>350000&row_number()<=400000)
-Cuyahoga_Addresses9 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>400000&row_number()<=450000)
-Cuyahoga_Addresses10 <- Cuyahoga_Addresses %>% 
-  filter(row_number()>450000&row_number()<=500000)
-
-
-
-
-
-rio::export(Cuyahoga_Addresses1, "Cuyahoga_Addresses1.csv")
-rio::export(Cuyahoga_Addresses2, "Cuyahoga_Addresses2.csv")
-rio::export(Cuyahoga_Addresses3, "Cuyahoga_Addresses3.csv")
-rio::export(Cuyahoga_Addresses4, "Cuyahoga_Addresses4.csv")
-rio::export(Cuyahoga_Addresses5, "Cuyahoga_Addresses5.csv")
-rio::export(Cuyahoga_Addresses6, "Cuyahoga_Addresses6.csv")
-rio::export(Cuyahoga_Addresses7, "Cuyahoga_Addresses7.csv")
-rio::export(Cuyahoga_Addresses8, "Cuyahoga_Addresses8.csv")
-rio::export(Cuyahoga_Addresses9, "Cuyahoga_Addresses9.csv")
-rio::export(Cuyahoga_Addresses10, "Cuyahoga_Addresses10.csv")
-```
-
-
-
-
-rio::export(Cuyahoga_Addresses1, "Cuyahoga_Addresses1.csv")
-> rio::export(Cuyahoga_Addresses2, "Cuyahoga_Addresses2.csv")
-> rio::export(Cuyahoga_Addresses3, "Cuyahoga_Addresses3.csv")
-> rio::export(Cuyahoga_Addresses4, "Cuyahoga_Addresses4.csv")
-> rio::export(Cuyahoga_Addresses5, "Cuyahoga_Addresses5.csv")
-> rio::export(Cuyahoga_Addresses6, "Cuyahoga_Addresses6.csv")
-> rio::export(Cuyahoga_Addresses7, "Cuyahoga_Addresses7.csv")
-> rio::export(Cuyahoga_Addresses8, "Cuyahoga_Addresses8.csv")
-> rio::export(Cuyahoga_Addresses9, "Cuyahoga_Addresses9.csv")
-> rio::export(Cuyahoga_Addresses10, "Cuyahoga_Addresses10.csv")
-
-
-
-Cuyahoga_Addresses1 <- Cuyahoga_Addresses %>% 
-  filter(row_number()<=49999)```{r}
-#Cuyahoga_Addresses_With_Geocode <- mutate_geocode(Cuyahoga_Addresses,address)
-
-```
-
-
-
-
-
-
-
-This is geting to be a big file, though, so we want to take out some columns we don't need. 
+To map this data, we used parcel shapefiles from [Cuyahoga County's Open Data Portal.](https://data-cuyahoga.opendata.arcgis.com/) Specifically, we want to open and combine the shapefiles for Cleveland and non-Cleveland so we can map this and just get an idea of where these properties are. 
 
 ```{r}
-Cuyahoga_data <- Cuyahoga_data %>% 
-  select("PARCEL_ID",                   "PROPERTY_NUMBER.x",            "CITY_NAME",                    "SCHOOL_DIST_NAME",            
-"TAX_SET",                      "TAX_DIST_NAME",                "DEEDED_OWNER",                 "PAR_ADDR_NO",                 
-"PAR_DIR",                      "PAR_STREET",                  "PAR_ST_SUFFX",                 "PAR_UNIT",                    
- "PROP_CLASS",  "EXT_LUC", "EXT_LUC_DESCRIPTION",         
-"APPRAISAL_NEIGHBORHOOD"       "PCL_AREA"                     "TWO_HALF_CREDIT"              "HOMESTEAD_CREDIT"            
- [33] "ROLLBACK_CREDIT"              "FORECLOSURE_FLAG"             "TAX_YEAR"                     "CERT_TOT"                    
- [37] "CERT_BLD"                     "CERT_LND"                     "CERT_TAX_TOT"                 "CERT_TAX_BLD"                
- [41] "CERT_TAX_LND"                 "CERT_EXT_TOT"                 "CERT_EXT_BLD"                 "CERT_EXT_LND"                
- [45] "CERT_ABT_TOT"                 "CERT_ABT_BLD"                 "CERT_ABT_LND"                 "ASSD_TAX_TOT"                
- [49] "ASSD_TAX_BLD"                 "ASSD_TAX_LND"                 "ASSD_EXT_TOT"                 "ASSD_EXT_BLD"                
- [53] "ASSD_EXT_LND"                 "ASSD_ABT_TOT"                 "ASSD_ABT_BLD"                 "ASSD_ABT_LND"                
- [57] "RUN_DATE"                     "TRANSFER_TO_ID"               "WHS_ID"                       "TRANSFER_HISTORY_ID"         
- [61] "TRANSFER_ORDER"               "PROPERTY_NUMBER.y"            "GRANTEE1"                     "GRANTOR1"                    
- [65] "TRANSFER_DATE"                "SALES_AMOUNT"                 "DEED_TYPE"                    "INSTRUMENT_NUMBER"           
- [69] "RECORDED_BOOK"                "RECORDED_PAGE"                "INSTRUMENT_TYPE"              "SALE_VALID"                  
- [73] "MULTIPROPERTY_SALE"           "NUMBER_OF_PROPERTIES_IN_SALE" "CONVEYANCE_NUMBER"            "CONVEYANCE_FEE"              
- [77] "USER_ID"                      "RECEIPT_NUMBER"               "AUTO_FILE_NUMBER"             "CHANGE_TIMESTAMP"            
- [81] "TRANSFER_NUMBER"              "TRANSFER_STATUS"              "MONTH_OF_SALE"                "YEAR_OF_SALE"                
- [85] "CAMA_SALE_FILE"               "CAMA_INV_FILE"                "TRANSFER_TYPE"                "INSTRUMENT_DATE"             
- [89] "RECORDED_DATE"                "TRANSFER_FEE"                 "PERMISSIVE_FEE"               "AMOUNT_PAID"                 
- [93] "FEE_PAID_BY"                  "FEE_CHECK_NUM"                "SALES_SOURCE"                 "DEED_NUMBER"                 
- [97] "EXEMPTCODE"                   "ASSUMED_LOAN_AMOUNT"          "PERSONAL_PROPERTY_AMOUNT"     "BUILDINGS_ON_LAND"           
-[101] "GIFT"                         "LAND_CONTRACT"                "LEASED_FEE"                   "LEASE_HOLD"                  
-[105] "LIFE_ESTATE"                  "MINERAL_RIGHTS_RESERVED"      "MOTHER"                       "PARTINTER_EST_TRANSFERRED"   
-[109] "GRANTOR_IS_MORTGAGEE"         "GRANTOR_IS_RELATIVE"          "TRADE"                        "TRANSFER_TYPE_DESCR"         
-[113] "SALES_SOURCE_DESCR"           "EXEMPTCODE_DESCR"             "TRANSFER_FROM_PARCEL"         "UPDATE_DATE"                 
-[117] "Date_Recorded"               
+setwd("~/Code/Blue/Housing_Equity/Combined_Parcels_-_Non-Cleveland_Only")
+Non_Cleveland_Geo <- sf::st_read("Combined_Parcels_-_Non-Cleveland_Only.shp")
+head(Non_Cleveland_Geo)
+
+setwd("~/Code/Blue/Housing_Equity/Combined_Parcels_-_Cleveland_Only")
+Cleveland_Geo <- sf::st_read("Combined_Parcels_-_Cleveland_Only.shp")
+head(Non_Cleveland_Geo)
+
+Cuyahoga_geo <- rbind(Non_Cleveland_Geo, Cleveland_Geo)
+```
+
+```{r}
+Cuyahoga_data_with_map <- merge(Cuyahoga_data, Cuyahoga_geo, by.x="PARCEL_ID",by.y="parcel_id")
+```
+
+Exporting this to vizualize it
+```{r vizualizing it}
+Cuyahoga_data_with_map <- st_as_sf(Cuyahoga_data_with_map)
+
+plot(Cuyahoga_data_with_map %>% select(PARCEL_ID, geometry))
+
+```
+
+Adding a background map so we can zoom in and out.
+```{r}
+Cuyahoga_Properties_plotted <- leaflet(data = Cuyahoga_data_with_map) %>% 
+  addTiles() %>% 
+  setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
+  addPolygons()
+  
+Cuyahoga_Properties_plotted
 ```
 
 
+Now we need to bring in the parcel numbers that no longer exist. (This was done manually, by going through the chain of title.)
+
+So this is two different types of map data: parcels and points. Since these parcels no longer exist, we can't get their polygons, so we had to find their addresses and then geocode them to get their points.  For visualization purposes, we will want to see where these are. And some addresses have more than one property number. (And some property numbers have more than one address, as in apartments.) 
+
+So we also need the version with the property numbers for the machine learning part. 
+
+Bringing in the demolished parcels with approximate addresses
+```{r}
+Cuyahoga_demolished_with_Addresses <- rio::import("Cuyhoga Properties demolished with approximate addresses.csv")
+```
+
+Bringing in the geocoded parcels
+
+```{r}
+Cuyahoga_demolished_with_Addresses_and_Geocoded <- rio::import("Cuyahoga demolished with addresses and geocoded.csv")
+
+```
+
+Adding the geocoded parcels to the map:
+```{r}
+Cuyahoga_Properties_plotted_all <- leaflet(data = Cuyahoga_data_with_map) %>% 
+  addTiles() %>% 
+  setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
+  addPolygons() %>% 
+  addMarkers(lat = Cuyahoga_demolished_with_Addresses_and_Geocoded$lat, lng = Cuyahoga_demolished_with_Addresses_and_Geocoded$lon, popup = "address")
+  
+Cuyahoga_Properties_plotted_all
+```
+
+Some parcels were subsumed into other parcels that had never been taken over by the land bank, some became part of other land bank properties, etc. 
+
+
+Wheare are political donors in relation to this map? Note: Some listed home and some listed their work adddress. 
+
+```{r}
+setwd("~/Code/Blue/Housing_Equity/Political Contributions")
+
+Cuyahoga_Campaign_Contributions <- rio::import("County Campaign Contributions Cuyahoga_geocoded_v3.0.csv")
+Cuyahoga_Campaign_Contributions$Amount <- as.double(Cuyahoga_Campaign_Contributions$Amount)
+
+```
+
+```{r}
+Cuyahoga_Properties_plotted_with_Contributions <- leaflet() %>% 
+  addTiles(data = Cuyahoga_data_with_map) %>% 
+  setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
+  addPolygons(data = Cuyahoga_data_with_map) %>% 
+  addMarkers(lat = Cuyahoga_demolished_with_Addresses_and_Geocoded$lat, lng = Cuyahoga_demolished_with_Addresses_and_Geocoded$lon, popup = Cuyahoga_demolished_with_Addresses_and_Geocoded$address) %>% 
+  addCircleMarkers(lat = Cuyahoga_Campaign_Contributions$lat, lng =Cuyahoga_Campaign_Contributions$lon, color ="red", popup =Cuyahoga_Campaign_Contributions$address)
+  
+Cuyahoga_Properties_plotted_with_Contributions
+```
+
+Doesn't look like there's much overlap betwen political contributors of Budish and Gallagher and land bank properties. Though note: in Cuyahoga county, nine people actually adjudicate the BOR forclosures, not the BOR itself. We got that list of people through 
 
 
 
-
-Let's geolocate
-
-Instead of Google Maps, which works wonderfully in R but is awfully expensive, we will be using the [Decentralized Geomarker Assessment for Multi-Site Studies](https://degauss.org/)
-
-Here is the required cite:
-    _Cole Brokamp, Chris Wolfe, Todd Lingren, John Harley, Patrick Ryan. Decentralized and Reproducible Geocoding and Characterization of Community and Environmental Exposures for Multi-Site Studies. Journal of American Medical Informatics Association. 25(3). 309-314. 2018. [Download.](https://colebrokamp-website.s3.amazonaws.com/publications/Brokamp_JAMIA_2017.pdf)
-    Cole Brokamp. DeGAUSS: Decentralized Geomarker Assessment for Multi-Site Studies. Journal of Open Source Software. 2018. [Download.](https://colebrokamp-website.s3.amazonaws.com/publications/Brokamp_JOSS_2018.pdf)_
-
-
-We need an address column named address for this to work so: 
+What properties were behind on their taxes an potentially subject to being taken over?
 
 
 ```{r}
-Cuyahoga_data <- Cuyahoga_data %>% 
-  mutate(address=
+Cuyahoga_Delinquent_2018 <- rio::import("DelnqntTaxPayers_Entire County JAN 23 2019.xlsx")#they have to be certified in January that they didn't pay all of 2018
+
+setwd("~/Code/Blue/Housing_Equity/Cuyahoga_Delinquent_2019")
+
+list_of_files <- list.files(path = ".", recursive = TRUE,
+                            pattern = "\\.xlsx$", 
+                            full.names = TRUE)
+
+Cuyahoga_Delinquent_2019 <- list_of_files %>%
+  purrr::set_names(nm = (basename(.) %>% tools::file_path_sans_ext())) %>%
+  purrr::map_df(read_excel, progress = show_progress())
+
+setwd("~/Code/Blue/Housing_Equity/Cuyahoga_Delinquent_2020")
+
+Cuyahoga_Delinquent_2019 <- Cuyahoga_Delinquent_2019 %>% filter(SCHOOL_DESCR!="Delinquent is defined as having a balance greater than $0.00 and no payment plan  after 2nd half collection closed.CUYAHOGA COUNTY ASSUMES NO LIABILITY FOR DAMAGES AS A RESULT OF ERRORS, OMISSIONS OR DISCREPANCIES CONTAINED IN THESE PAGES. PROSPECTIVE PURCHASERS SHOULD CONSULT A REAL ESTATE ATTORNEY AND PURCHASE A TITLE INSURANCE POLICY PRIOR TO THE SALE.") %>% filter(!is.na(SCHOOL_DESCR))
+
+list_of_files <- list.files(path = ".", recursive = TRUE,
+                            pattern = "\\.xlsx$", 
+                            full.names = TRUE)
+
+Cuyahoga_Delinquent_2020 <- list_of_files %>%
+  purrr::set_names(nm = (basename(.) %>% tools::file_path_sans_ext())) %>%
+  purrr::map_df(read_excel, col_types ="text", progress = show_progress())
+
+
+Cuyahoga_Delinquent_2020 <- Cuyahoga_Delinquent_2020 %>% filter(SCHOOL_DESCR!="Delinquent is defined as having a balance greater than $0.00 and no payment plan  after 2nd half collection closed.CUYAHOGA COUNTY ASSUMES NO LIABILITY FOR DAMAGES AS A RESULT OF ERRORS, OMISSIONS OR DISCREPANCIES CONTAINED IN THESE PAGES. PROSPECTIVE PURCHASERS SHOULD CONSULT A REAL ESTATE ATTORNEY AND PURCHASE A TITLE INSURANCE POLICY PRIOR TO THE SALE.") %>% filter(!is.na(SCHOOL_DESCR))
 ```
 
 
 
+
+Adding those together
+
+```{r}
+Cuyahoga_Delinquent_2018 <- Cuyahoga_Delinquent_2018 %>% 
+  rename(SCHOOL_DESCR=SCHOOL_DIST_NAME) %>% 
+  select(PROPERTY_NUMBER,SCHOOL_DESCR,PRIMARY_OWNER_NAME,TAX_YEAR,CLASSIFICATION_ID,CLASSIFICATION_DESCR, GRAND_TOTAL_OWED, GRAND_TOTAL_PAID, GRAND_TOTAL_BALANCE,UPDATE_DATE)
+
+Cuyahoga_Delinquent_2019 <- Cuyahoga_Delinquent_2019 %>% select(PROPERTY_NUMBER,SCHOOL_DESCR,PRIMARY_OWNER_NAME,TAX_YEAR,CLASSIFICATION_ID,CLASSIFICATION_DESCR, GRAND_TOTAL_OWED, GRAND_TOTAL_PAID, GRAND_TOTAL_BALANCE,UPDATE_DATE)
+
+Cuyahoga_Delinquent_2020 <- Cuyahoga_Delinquent_2020 %>% select(PROPERTY_NUMBER,SCHOOL_DESCR,PRIMARY_OWNER_NAME,TAX_YEAR,CLASSIFICATION_ID,CLASSIFICATION_DESCR, GRAND_TOTAL_OWED, GRAND_TOTAL_PAID, GRAND_TOTAL_BALANCE,UPDATE_DATE)
+
+Cuyahoga_Delinquents <- rbind(Cuyahoga_Delinquent_2018, Cuyahoga_Delinquent_2019,Cuyahoga_Delinquent_2020)
+head(Cuyahoga_Delinquents)
+
+```
+
+
+
+Some properties might be delinquent both years. 
+```{r}
+  Cuyahoga_Delinquents %>% count(PROPERTY_NUMBER)
+```
+
+So we need to keep only the distinct ones
+
+```{r}
+Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>%  distinct(PROPERTY_NUMBER, .keep_all = TRUE)
+```
+
+
+
+
+That's a lot of properties. 
+
+It appears that not all those properties are actually delinquent though. For example, 120-19-003 is a dorm at Case Western reserve. 
+
+We asked them why they owed ~$4 million in taxes, they said they were exempt. 
+!("Case Western taxes.jpeg")
+
+Here is a reference to the [Legal Use Codes in Ohio.]("https://codes.ohio.gov/ohio-administrative-code/rule-5703-25-10")
+So though their Classification ID is in the commercial taxable bracket, In the (400-0s) their exempt Land Use Code makes them exempt from tax. (In the 600-0s)
+
+So we need to determine what the exempt legal use code is, and filter that out. 
+note: properties in the 700-0s are exempt because they are in the land bank essentially 
+
+```{r}
+Cuyahoga_Delinquents$CLASSIFICATION_ID <- as.double(Cuyahoga_Delinquents$CLASSIFICATION_ID)
+
+Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>% 
+  filter(CLASSIFICATION_ID<6000|CLASSIFICATION_ID>6999|is.na(CLASSIFICATION_ID))
+```
+
+
+
+
+Which parcels were eventually foreclosed upon?
+First, our main chunk of properties. Then, the property numbers that were demolished, which were all LB properties.
+
+We want to make sure that we get the folks who were late on their taxes and THEN the government chose to foreclose on them. (So we don't tage anyone who got their property from the land bank and then was late on their taxes.) 
+
+You have to not pay your taxes for a whole year in Ohio, then they are certified late by the county Auditor. So Tax Year 2018 means your delinquent certification was actually issued in January of 2019. 
+
+So for our purposes, we want to look for property transfers to the land bank which took place after January 23, 2019. 
+
+
+```{r}
+Cuyahoga_data_with_map_post_Jan_2019 <- filter(Cuyahoga_data_with_map, Transfer_date>"2019-01-23")
+
+Cuyahoga_demolished_with_Addresses$Transfer_date <- lubridate::dmy(Cuyahoga_demolished_with_Addresses$TRANSFER_DATE)
+Cuyahoga_demolished_with_Addresses_post_Jan_2019 <- filter(Cuyahoga_demolished_with_Addresses, Transfer_date>"2019-01-23")
+
+Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>% 
+  mutate(Land_Bank=if_else(PROPERTY_NUMBER %in% Cuyahoga_data_with_map_post_Jan_2019$PROPERTY_NUMBER|PROPERTY_NUMBER %in% Cuyahoga_demolished_with_Addresses_post_Jan_2019$PROPERTY_NUMBER,1,0))
+
+```
+
+ 
+
+How many is that? What percent of 2018-2019-2020 delinquent properties were taken over by the government or land bank in 2019, 2020, or 2021?
+
+```{r}
+sum(Cuyahoga_Delinquents$Land_Bank, na.rm = TRUE)
+nrow(Cuyahoga_Delinquents)
+
+sum(Cuyahoga_Delinquents$Land_Bank, na.rm = TRUE)/(sum(Cuyahoga_Delinquents$Land_Bank, na.rm = TRUE)+
+nrow(Cuyahoga_Delinquents))#Order of operations
+```
+
+
+And putting the amount owed in numeric form: 
+
+```{r}
+Cuyahoga_Delinquents$GRAND_TOTAL_OWED <- as.double(Cuyahoga_Delinquents$GRAND_TOTAL_OWED)
+Cuyahoga_Delinquents$GRAND_TOTAL_PAID <- as.double(Cuyahoga_Delinquents$GRAND_TOTAL_PAID)
+Cuyahoga_Delinquents$GRAND_TOTAL_BALANCE <-as.double(Cuyahoga_Delinquents$GRAND_TOTAL_BALANCE)
+```
+
+
+The value of most land bank properties is hard to gauge. Some are worth essentially negative money, as they would be harder to fix up than to actually operate. 
+
+Some of the people who are behind on their taxes aren't behind by much- for example, the 169 people who owe a cent- that's probably a typo. 
+
+On the other had, a property in Montgomery county got foreclosed upon [for owing thirteen cents.](https://eyeonohio.com/wp-content/uploads/2020/02/Affidavit-of-Treasurer-for-parcel-number-13508151.pdf) They hadn't actually paid their tax bill in years, but they put that amount on the lien as the actual amount didn't matter- it's not like they would be collecting it anyway, they just needed to get a certified lien to foreclose upon. 
+
+So to get a sense of how behind these properties are on their taxes, we will calculate the amount owed as a percentage of their certified total property value. 
+
+```{r}
+Cuyahoga_Delinquents$Certified_Total_Value <- Cuyahoga_Properties$CERT_TOT[match(Cuyahoga_Delinquents$PROPERTY_NUMBER, Cuyahoga_Properties$PROPERTY_NUMBER)]
+
+Cuyahoga_Delinquents <-  Cuyahoga_Delinquents %>% 
+  mutate(owed_as_percentage_of_lot_value=GRAND_TOTAL_BALANCE/Certified_Total_Value)
+```
+
+Note: 68 properties are listed as having a value of 0. This is on the website too, and there doesn't seem to be a clear pattern. We are adding this to our list to ask the fiscal officer. 
+
+```{r}
+Cuyahoga_Delinquents_with_0_value <- Cuyahoga_Delinquents %>% select(PROPERTY_NUMBER,Certified_Total_Value) %>% filter(Certified_Total_Value==0)
+
+Cuyahoga_Delinquents <-  Cuyahoga_Delinquents %>% filter(Certified_Total_Value!=0)
+```
+
+
+
+
+So 2,362 properties went to the government, but that's only 2% of the properties. (And some ostensibly people paid their back taxes!) 
+
+Next: we need to bring in the categories of each school district. 
 
 This is from the Ohio Department of Education. [There's no direct download link, you have to choose what you want.](https://reports.education.ohio.gov/report/report-card-data-district-enrollment-by-student-demographic)
+
+They don't allow you to download all the info at once by district, or if they do we couldn't figure it out. But anyway, this takes every school in Cuyahoga. (So we searched for "Cuyahoga," clicked on the button next to each one, then downloaded.) 
+
+
 ```{r}
-Cuyahoga_schools_demographic <- rio::import("report-card-data-district-enrollment-by-student-demographic - Demographic Overview - Enrollment by Race_Ethnicity.csv")
+Cuyahoga_schools_demographic <- rio::import("Cuyahoga Schools Info.xlsx")
+
+head(Cuyahoga_schools_demographic)
+```
+
+A few things about this data: 
+*They write "<10" for small categories less than 10, instead of an actual number. 
+*Unlike on the website, this has decimals. How do you have part of a kid? Clarification from the Ohio Dept of education's Mandy Minick: "we count students as full time equivalents (FTEs) based on the length of time they are enrolled.  A student enrolled all year counts as 1.0 FTE in the total.  A student enrolled for half a year is 0.5 FTEs and so on.  We sum all the FTEs across the entire year (hence, the decimals). The spreadsheet on the left shows the decimals (33.188847), while the one on the right is rounded to the closest whole number for ease of reading."
+
+
+How many kids are in each district?
+
+```{r}
+Cuyahoga_schools_demographic_no_remainders <- Cuyahoga_schools_demographic %>% 
+  filter(CountOfEnrolledStudents!="<10")
+
+  
+Cuyahoga_schools_demographic_no_remainders$CountOfEnrolledStudents <- as.double(Cuyahoga_schools_demographic_no_remainders$CountOfEnrolledStudents)
+
+Cuyahoga_school_pop <- Cuyahoga_schools_demographic_no_remainders%>% 
+  group_by(District) %>% 
+    summarize(Total=sum(CountOfEnrolledStudents))
+
+datatable(Cuyahoga_school_pop)
+```
+
+Here we are going to treat race and socioeconomic status as factors, even though we have numbers. Why? 
+
+These variables are going to affect our data in a categorical way. You either are discriminating on race or class or you are not. The amount of discrimination does not depend on the amount of people. For example, in the [Kaggle Titantic competition](https://www.kaggle.com/c/titanic) (which is great way to learn machine learning!) The passengers' ticket price is listed. Which passengers were more likely to survive?
+
+You are more likely to survive _if you have a first class ticket_. Period. If your first class ticket costs twice as much as the next first class ticket, that didn't make you twice as likely to survive as someone with a ticket half that price. 
+
+Which school districts have large minority populations? Which have populations with a high number of kids in poverty? 
+
+
+Finding percentage of minority by District: 
+```{r}
+Cuyahoga_schools_by_race <- Cuyahoga_schools_demographic_no_remainders %>% 
+  group_by(District,`Race/Ethnicty`,) %>% #typo in original for 'ethnicity'
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Cuyahoga_schools_by_race)
+```
+
+```{r}
+Cuyahoga_schools_by_race %>% 
+  filter(`Race/Ethnicty`=="White, Non-Hispanic") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
 ```
 
 
+
+
+Finding percent disadvantaged by district: 
+ 
+```{r}
+Cuyahoga_schools_by_poverty <- Cuyahoga_schools_demographic_no_remainders %>% 
+  group_by(District,Subgroup,) %>% 
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Cuyahoga_schools_by_poverty)
+```
+
+```{r}
+Cuyahoga_schools_by_poverty %>% 
+  filter(Subgroup=="Economic Disadvantaged") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+And categorizing them: 
+
+```{r}
+Cuyahoga_schools_by_race_with_majority_white <- Cuyahoga_schools_by_race %>% 
+  group_by(District) %>% 
+summarize(Majority_White=if_else(`Race/Ethnicty`=="White, Non-Hispanic"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_White_District=if_else(sum(Majority_White)==1,1,0))
+  
+
+Cuyahoga_schools_with_majority_disadvantaged <- Cuyahoga_schools_by_poverty %>% 
+  group_by(District) %>% 
+summarize(Majority_Disadvantaged=if_else(Subgroup=="Economic Disadvantaged"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_Disadvantaged_District=if_else(sum(Majority_Disadvantaged)==1,1,0))
+
+  
+```
+
+How are the school districts represented in our delinquent dataset?
+
+```{r}
+Cuyahoga_Delinquents_by_School_District <- Cuyahoga_Delinquents2018_2019 %>% group_by(School_District) %>% summarize(Total=n())
+datatable(Cuyahoga_Delinquents_by_School_District)
+
+```
+
+
+
+The names of school districts is the same but listed a bit differently in both data sets, so we have to do a bit of manual matching here. 
+
+```{r}
+Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>% 
+  mutate(School_Dest_Standardized= case_when(
+     SCHOOL_DESCR=="CLEVELAND MSD" ~ "Cleveland Municipal - 043786 (Cuyahoga)",
+     SCHOOL_DESCR=="CLEVELAND CSD" ~ "Cleveland Municipal - 043786 (Cuyahoga)", #Not sure why this is in here two ways but properties on the website listed as MSD here are CSD on Auditor's site
+     SCHOOL_DESCR=="BEREA CSD" ~ "Berea City - 043612 (Cuyahoga)",                              
+SCHOOL_DESCR=="SHAKER HEIGHTS CSD"  ~   "Shaker Heights City - 044750 (Cuyahoga)",                 
+SCHOOL_DESCR=="BAY VILLAGE CSD" ~ "Bay Village City - 043547 (Cuyahoga)" ,                       
+SCHOOL_DESCR=="WESTLAKE CSD"~   "Westlake City - 045062 (Cuyahoga)",                        
+SCHOOL_DESCR=="NORTH OLMSTED CSD" ~ "North Olmsted City - 044529 (Cuyahoga)",                     
+SCHOOL_DESCR=="OLMSTED FALLS CSD" ~"Olmsted Falls City - 046573 (Cuyahoga)",                     
+SCHOOL_DESCR=="ROCKY RIVER CSD"~  "Rocky River City - 044701 (Cuyahoga)",                      
+SCHOOL_DESCR=="LAKEWOOD CSD" ~  "Lakewood City - 044198 (Cuyahoga)",                        
+SCHOOL_DESCR=="FAIRVIEW PARK CSD"  ~ "Fairview Park City - 043976 (Cuyahoga)",                     
+SCHOOL_DESCR=="STRONGSVILLE CSD"~ "Strongsville City - 044842 (Cuyahoga)" ,                     
+SCHOOL_DESCR=="BROOKLYN CSD" ~  "Brooklyn City - 043653 (Cuyahoga)",                         
+SCHOOL_DESCR=="PARMA CSD"~ "Parma City - 044636 (Cuyahoga)",                              
+SCHOOL_DESCR=="NORTH ROYALTON CSD"  ~  "North Royalton City - 044545 (Cuyahoga)",                  
+SCHOOL_DESCR=="BRECKSVILLE-BROADVIEW HEIGHTS SD"  ~  "Brecksville-Broadview Heights City - 043646 (Cuyahoga)",  
+SCHOOL_DESCR=="BRECKSVILLE-BROADVIEW HEIGHTS" ~  "Brecksville-Broadview Heights City - 043646 (Cuyahoga)", 
+SCHOOL_DESCR=="CUYAHOGA HEIGHTS LSD"~  "Cuyahoga Heights Local - 046557 (Cuyahoga)",           
+SCHOOL_DESCR=="GARFIELD HEIGHTS CSD" ~  "Garfield Heights City Schools - 044040 (Cuyahoga)" ,                
+SCHOOL_DESCR=="INDEPENDENCE LSD" ~ "Independence Local - 046565 (Cuyahoga)",                       
+SCHOOL_DESCR=="EUCLID CSD"~  "Euclid City - 043950 (Cuyahoga)",                            
+SCHOOL_DESCR=="RICHMOND HEIGHTS LSD" ~   "Richmond Heights Local - 046599 (Cuyahoga)",               
+SCHOOL_DESCR=="SOUTH EUCLID-LYNDHURST CSD" ~ "South Euclid-Lyndhurst City - 044792 (Cuyahoga)",            
+SCHOOL_DESCR=="EAST CLEVELAND CSD"~ "East Cleveland City School District - 043901 (Cuyahoga)",                     
+SCHOOL_DESCR=="CLEVELAND HEIGHTS-UNIVERSITY HEIGHTS SD"~"Cleveland Heights-University Heights City - 043794 (Cuyahoga)",
+SCHOOL_DESCR=="CLEVELAND HTS-UNIVERSITY HTS C"~"Cleveland Heights-University Heights City - 043794 (Cuyahoga)", #also written two ways
+SCHOOL_DESCR=="WESTLAKE CSD" ~ "Westlake City - 045062 (Cuyahoga)",
+SCHOOL_DESCR=="BEACHWOOD CSD"~  "Beachwood City - 043554 (Cuyahoga)",                         
+SCHOOL_DESCR=="WARRENSVILLE HEIGHTS CSD"~ "Warrensville Heights City - 045005 (Cuyahoga)",               
+SCHOOL_DESCR=="ORANGE CSD" ~  "Orange City - 046581 (Cuyahoga)",                          
+SCHOOL_DESCR=="MAPLE HEIGHTS CSD"~  "Maple Heights City - 044305 (Cuyahoga)",                     
+SCHOOL_DESCR=="BEDFORD CSD"  ~  "Bedford City - 043562 (Cuyahoga)",                         
+SCHOOL_DESCR=="MAYFIELD CSD" ~ "Mayfield City - 044370 (Cuyahoga)",                         
+SCHOOL_DESCR=="CHAGRIN FALLS EVSD" ~"Chagrin Falls Exempted Village - 045286 (Cuyahoga)",                     
+SCHOOL_DESCR=="SOLON CSD" ~ "Solon City - 046607 (Cuyahoga)" ))                            
+
+
+
+```
+
+And here we incorporate race and socioeconomic status as factors. 
+
+```{r}
+Cuyahoga_Delinquents$is_school_district_majority_white <- Cuyahoga_schools_by_race_with_majority_white$Majority_White_District[match(Cuyahoga_Delinquents$School_Dest_Standardized,Cuyahoga_schools_by_race_with_majority_white$District)]
+
+Cuyahoga_Delinquents$is_school_district_majority_disadvantaged <- Cuyahoga_schools_with_majority_disadvantaged$Majority_Disadvantaged_District[match(Cuyahoga_Delinquents$School_Dest_Standardized,Cuyahoga_schools_with_majority_disadvantaged$District)]
+
+
+```
+
+
+Some exploratory analysis: 
+
+Of the parcels taken over by the land bank, how many are in majority white districts? How does that compare the number of delinquent taxpayers who are in majority white districts?
+```{r}
+prop.table(table(Cuyahoga_Delinquents$is_school_district_majority_white, Cuyahoga_Delinquents$Land_Bank))
+```
+On the left, in the column, 0 represents the school district is not majority white, and 1 represents the school district is. 
+
+On top, 0 represents that the property is not a Land bank (or property forfeited to the government.) And 1 is yes.
+
+
+What percentage of delinquent properties are in majority white school districts? What percentage of properties that go to the land bank are in majority white school districts?
+```{r}
+
+Cuyahoga_Delinquents %>% group_by(Land_Bank) %>% count(is_school_district_majority_white)
+```
+
+
+
+
+And majority disadvantaged? How does that compare to the number of delinquent taxpayers who are in majority disadvantaged districts?
+
+```{r}
+prop.table(table(Cuyahoga_Delinquents$is_school_district_majority_disadvantaged, Cuyahoga_Delinquents$Land_Bank))
+```
+On the left, in the column, 0 represents the school district is not majority disadvantaged, and 1 represents the school district is. 
+
+On top, 0 represents that the property is not a Land bank (or property forfeited to the government.) And 1 is yes.
+
+
+
+
+Where are the properties, and which ones did the government take over?
+
+```{r}
+Cuyahoga_Delinquent_data_with_map <- Cuyahoga_Delinquents %>% 
+distinct(PROPERTY_NUMBER, .keep_all = TRUE)
+
+Cuyahoga_Delinquent_data_with_map <- Cuyahoga_Delinquent_data_with_map %>% 
+  mutate(parcel_id=(sub("-","",PROPERTY_NUMBER,fixed = TRUE))) %>% 
+  mutate(parcel_id=(sub("-","",parcel_id,fixed = TRUE)))
+
+
+
+Cuyahoga_Delinquent_data_with_map <- merge(Cuyahoga_Delinquent_data_with_map, Cuyahoga_geo, by="parcel_id")
+```
+
+
+Where the land bank properties in the past year? (Or taken over by another govt entity)
+```{r}
+Cuyahoga_Delinquent_data_with_map <- st_as_sf(Cuyahoga_Delinquent_data_with_map)
+
+Cuyahoga_Delinquent_Properties_plotted <- Cuyahoga_Delinquent_data_with_map %>% 
+  filter(Land_Bank==1) %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
+  addPolygons(fillColor = Cuyahoga_Delinquent_data_with_map$Land_Bank)
+  
+Cuyahoga_Delinquent_Properties_plotted
+```
+
+###Machine Learning
+
+
+Okay step one: choosing an appropriate model. We want to predict here whether a property will end up in the land bank or not. So we are looking to build a Classification model. 
+
+So first, we have very few Land bank properties versus delinquent properties overall. And this, of course, is our whole story. Who has the power to decide where this will happen? But we will have to take this into account and try to split our training and test sets with an equal number of land bank properties. 
+
+Next, we are going to split the dataset into training and testing models, evenly diving the sections between the Land Bank and non-land bank properties. 
+
+```{r}
+stack_overflow <- Cuyahoga_Delinquents %>%
+    mutate(Land_Bank = factor(Land_Bank, levels = c(1,0))) %>%
+    mutate_if(is.character, factor)
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_DESCR, -School_Dest_Standardized)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Land_Bank)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Land_Bank ~ ., data = stack_train) %>% 
+    step_downsample(Land_Bank)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Land_Bank)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Land_Bank ~ ., data = stack_train) %>% 
+    step_downsample(Land_Bank)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Land_Bank ~ ., data = stack_train) %>% 
+    step_downsample(Land_Bank)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Land_Bank, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Land_Bank, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Land_Bank, estimate = .pred_glm)
+accuracy(results, truth = Land_Bank, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Land_Bank, estimate = .pred_glm)
+ppv(results, truth = Land_Bank, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+```{r}
+data <- Cuyahoga_Delinquents %>%
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_DESCR, -School_Dest_Standardized)
+
+names(data)
+
+#writing a function to automate writing the formula: 
+n<-names(data)
+form1 = as.formula(paste("Land_Bank ~", paste(n[!n %in% "Land_Bank"], collapse = " + ")))
+```
+
+Here we are going to fit a multiple linear regression model for the number of Land bank properties using the rest of the variables as explanatory variables (predictors):
+
+
+
+```{r}
+MLModel = lm(form1,data =data)
+
+MLModel
+```
+
+Let's see how well our model did. 
+
+```{r}
+summary(MLModel)
+```
+This is is terrible R value. So these factors do not matter as much. 
+
+
+Which variables are particularly important? 
+
+```{r}
+data <- Cuyahoga_Delinquents %>%
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_DESCR)
+
+names(data)
+
+#writing a function to automate writing the formula: 
+n<-names(data)
+form1 = as.formula(paste("Land_Bank ~", paste(n[!n %in% "Land_Bank"], collapse = " + ")))
+```
+
+Here we are going to fit a multiple linear regression model for the number of Land bank properties using the rest of the variables as explanatory variables (predictors):
+
+
+
+```{r}
+MLModel = lm(form1,data =data)
+
+MLModel
+```
+
+Let's see how well our model did. 
+
+```{r}
+summary(MLModel)
+```
+
+```{r}
+
+```
+
+
+
+Let's trace the actual values against the predicted ones. 
+
+##Allen County
+
+
+To map this data, we used parcel shapefiles from [Allen County's Open Data Portal.](http://gis.allencountyohio.com/GIS/downloads.html) 
+
+```{r}
+setwd("~/Code/Blue/Housing_Equity/Allen County Current_Parcels/")
+
+Allen_Geo <- sf::st_read("Current_Parcels.shp")
+head(Allen_Geo)
+
+
+```
+
+Now we are going to bring in the Land Bank Parcels for the past few years. 
+
+Through a FOIA: 
+
+```{r}
+Allen_County_LB_Properties <- rio::import("Allen County Land Bank Properties 1-1-16 to 7-1-21.xlsx")
+```
 
 
 

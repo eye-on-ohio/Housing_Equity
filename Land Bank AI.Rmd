@@ -257,6 +257,40 @@ head(Non_Cleveland_Geo)
 Cuyahoga_geo <- rbind(Non_Cleveland_Geo, Cleveland_Geo)
 ```
 
+This is awesome but for some reason the column names are not the same as the website, so fixing that. 
+
+```{r}
+Cuyahoga_geo <- Cuyahoga_geo %>% 
+  rename(parcel_year=parcel_yea,
+         Transfer_date=transfer_d,
+         Tax_Legal_Use_Description=tax_luc_de,
+         Property_Class=property_c,
+         Certified_Tax_Legal_Use_Classification=certified_,
+         Certified_Tax_Land=certifie_1,
+         Certified_Tax_Building=certifie_2,
+         Certified_Tax_Total=certifie_3,
+         Certified_Exempt_LUC=certifie_4,
+         Certified_Exempt_Land=certifie_5,
+         Certified_Exempt_Building=certifie_6,
+         Certified_Exempt_Total=certifie_7,
+         Certified_Abated_LUC=certifie_8,
+        Certified_Abated_Land=certifie_9,
+          Certified_Abated_Building=certifie10,
+          Certified_Abated_Total=certifie11,
+        Gross_Certified_Land=gross_cert,
+         Gross_Certified_Building=gross_ce_1,
+         Gross_Certified_Total=gross_ce_2,
+         Residential_building_count=res_bldg_c,
+         Total_residential_Living_Area=total_res_,
+         Total_residential_rooms=total_re_1,
+         Commerical_Building_Count=com_bldg_c,
+         Total_Commerical_UseArea=total_com_)
+```
+
+
+
+
+
 ```{r}
 Cuyahoga_data_with_map <- merge(Cuyahoga_data, Cuyahoga_geo, by.x="PARCEL_ID",by.y="parcel_id")
 ```
@@ -473,6 +507,7 @@ Cuyahoga_Delinquents$GRAND_TOTAL_BALANCE <-as.double(Cuyahoga_Delinquents$GRAND_
 The value of most land bank properties is hard to gauge. Some are worth essentially negative money, as they would be harder to fix up than to actually operate. 
 
 Some of the people who are behind on their taxes aren't behind by much- for example, the 169 people who owe a cent- that's probably a typo. 
+
 
 On the other had, a property in Montgomery county got foreclosed upon [for owing thirteen cents.](https://eyeonohio.com/wp-content/uploads/2020/02/Affidavit-of-Treasurer-for-parcel-number-13508151.pdf) They hadn't actually paid their tax bill in years, but they put that amount on the lien as the actual amount didn't matter- it's not like they would be collecting it anyway, they just needed to get a certified lien to foreclose upon. 
 
@@ -703,35 +738,15 @@ On top, 0 represents that the property is not a Land bank (or property forfeited
 
 
 
-Where are the properties, and which ones did the government take over?
-
-```{r}
-Cuyahoga_Delinquent_data_with_map <- Cuyahoga_Delinquents %>% 
-distinct(PROPERTY_NUMBER, .keep_all = TRUE)
-
-Cuyahoga_Delinquent_data_with_map <- Cuyahoga_Delinquent_data_with_map %>% 
-  mutate(parcel_id=(sub("-","",PROPERTY_NUMBER,fixed = TRUE))) %>% 
-  mutate(parcel_id=(sub("-","",parcel_id,fixed = TRUE)))
 
 
 
-Cuyahoga_Delinquent_data_with_map <- merge(Cuyahoga_Delinquent_data_with_map, Cuyahoga_geo, by="parcel_id")
-```
 
 
-Where the land bank properties in the past year? (Or taken over by another govt entity)
-```{r}
-Cuyahoga_Delinquent_data_with_map <- st_as_sf(Cuyahoga_Delinquent_data_with_map)
+Now we're trying to find: are officials more like to give parcels TO people if it's close to a big amenity? (Like a college or hospital?) To "spur development?"
 
-Cuyahoga_Delinquent_Properties_plotted <- Cuyahoga_Delinquent_data_with_map %>% 
-  filter(Land_Bank==1) %>% 
-  leaflet() %>% 
-  addTiles() %>% 
-  setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
-  addPolygons(fillColor = Cuyahoga_Delinquent_data_with_map$Land_Bank)
-  
-Cuyahoga_Delinquent_Properties_plotted
-```
+
+
 
 ###Machine Learning
 
@@ -933,6 +948,579 @@ Let's see how well our model did.
 ```{r}
 summary(MLModel)
 ```
+
+Not that well. So it looks like these factors aren't that important. 
+
+Let's see where properties are in relation to future developments. 
+
+Our Land_Bank_Recipients dataframe above takes properties where the land bank is the _grantor_ who then gives the property to the grantee. Legally, city land banks and county land banks are very different. County land banks have more powers, to get rid of tax liens and all other liens. So we want to look specifically at properties that went from the government to another entity (person or company) not just another land bank to hold onto. 
+
+
+```{r}
+Land_Bank_Recipients_Without_interlandbank_transfers <- Land_Bank_Recipients %>% 
+  filter(!str_detect(GRANTEE1, "land bank|LAND BANK|REUTILIZATION|Reutilization|FORF|LAND REUIT|REUT|CITY OF CLEVELAND")) 
+summary(Land_Bank_Recipients_Without_interlandbank_transfers)
+```
+
+
+```{r}
+Land_Bank_Recipients_Without_interlandbank_transfers <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
+  mutate(type=if_else(str_detect(GRANTEE1,"development|DEVELOPMENT|LLC|LTD|INC|Inc|COMPANY|CORPORATION"),"Corp/Development Group","person, church, etc"))
+
+
+ggplot(Land_Bank_Recipients_Without_interlandbank_transfers)+
+  aes(x=year(Transfer_date),fill=type)+
+  geom_bar()+
+  facet_wrap(~type)
+
+         
+```
+
+
+
+
+
+Where are these properties?
+
+```{r}
+#Land_Bank_Recipients_Without_interlandbank_transfers <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
+#distinct(PROPERTY_NUMBER, .keep_all = TRUE)
+
+Land_Bank_Recipients_Without_interlandbank_transfers <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
+  mutate(parcel_id=(sub("-","",PROPERTY_NUMBER,fixed = TRUE))) %>% 
+  mutate(parcel_id=(sub("-","",parcel_id,fixed = TRUE)))
+
+
+
+Land_Bank_Recipients_Without_interlandbank_transfers <- merge(Land_Bank_Recipients_Without_interlandbank_transfers, Cuyahoga_geo, by="parcel_id")
+```
+
+
+color = lubridate::year(Land_Bank_Recipients_Without_interlandbank_transfers$Transfer_date)
+
+
+Where are the properties that went from a land bank TO a person within the past year?
+```{r}
+Land_Bank_Recipients_Without_interlandbank_transfers <- st_as_sf(Land_Bank_Recipients_Without_interlandbank_transfers)
+
+Cuyahoga_Land_Bank_Recipient_Properties_plotted2021 <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
+  filter(year(Transfer_date.x)==2021) %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
+  addPolygons(popup = Land_Bank_Recipients_Without_interlandbank_transfers$parcel_id)
+  
+Cuyahoga_Land_Bank_Recipient_Properties_plotted2021
+```
+
+
+How does that compare to properties the Land Bank is holding onto?
+
+```{r}
+
+Land_Bank_Recipients_Without_interlandbank_transfers_20_and_21 <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
+  filter(year(Transfer_date.x)>2019)
+
+
+Cuyahoga_Land_Bank_Recipient_Properties_versus_ones_they_held_onto <- Cuyahoga_geo %>% 
+  filter(str_detect(deeded_own, "land bank|LAND BANK|REUTILIZATION|Reutilization|FORF")) %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
+  addPolygons(popup = Cuyahoga_geo$parcel_id, color = "red") %>% 
+  addPolygons(data= Land_Bank_Recipients_Without_interlandbank_transfers_20_and_21, color="green") #%>% 
+  #addPolygons(data = filter(Cuyahoga_geo, Gross_Certified_Total>1000000), color = "blue")
+  
+Cuyahoga_Land_Bank_Recipient_Properties_versus_ones_they_held_onto
+  
+```
+
+
+Where are the expensive properties in Cuyahoga county?
+
+What are the values of Cuyahoga parcels?
+
+```{r}
+ggplot(Cuyahoga_geo)+
+  aes(x=Gross_Certified_Total)+
+  geom_histogram(binwidth = 10000000)+
+  stat_bin(binwidth= 10000000, geom="text", aes(label=..count..), vjust = -1) + 
+scale_x_continuous(breaks = seq(0 , 702599700, 10000000) , labels = comma)+
+theme(axis.text.x = element_text(angle = 45, vjust = 1.2, hjust = 1.1))
+  geom_text(data=Cuyahoga_geo, mapping=aes(x=Gross_Certified_Total),label=Gross_Certified_Total)
+
+hist(Cuyahoga_geo$Gross_Certified_Total, xlim=range(1000000),labels = TRUE)
+```
+
+
+
+
+We are going to set the (rather arbitrary) cutoff of $10 million parcels. 
+
+```{r}
+Cuyahoga_geo_millions <- filter(Cuyahoga_geo, Gross_Certified_Total>10000000)
+```
+
+How close are gov owed parcels to prime real estate? 
+
+Adding mapping data to Cuyahoga Delinquents
+```{r}
+
+Cuyahoga_Delinquents_Geo <- Cuyahoga_Delinquents %>% 
+  mutate(parcel_id=(sub("-","",PROPERTY_NUMBER,fixed = TRUE))) %>% 
+  mutate(parcel_id=(sub("-","",parcel_id,fixed = TRUE)))
+
+Cuyahoga_Delinquents_Geo$geometry <- Cuyahoga_geo$geometry[match(Cuyahoga_Delinquents_Geo$parcel_id,Cuyahoga_geo$parcel_id)]
+
+Cuyahoga_Delinquents_Geo <- Cuyahoga_Delinquents_Geo %>% 
+filter(CLASSIFICATION_ID<6000|CLASSIFICATION_ID>6999|is.na(CLASSIFICATION_ID)) 
+
+raster::crs(Cuyahoga_Delinquents_Geo) <- "EPSG:4326" 
+shape_proj<-st_transform(Cuyahoga_Delinquents_Geo, CRS("+proj=gnom +lat_0=90 +lon_0=-50"))
+
+
+```
+Figuring out how far apart they are
+
+```{r }
+library(lwgeom)
+
+sf::sf_use_s2(FALSE)
+
+Cuyahoga_Distance_Matrix <- as.data.frame(st_distance(Cuyahoga_Delinquents_Geo$geometry,Cuyahoga_geo_millions$geometry)) #This takes quite a while just FYI
+
+
+%>% 
+  #Sets column names
+  
+Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix %>% 
+  `colnames<-`(Cuyahoga_geo_millions$parcel_id) %>% 
+  
+  #Adds a column containing names so that each row now also has a name
+  cbind(name =Cuyahoga_Delinquents_Geo$PROPERTY_NUMBER ) 
+#Cuyahoga_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Cuyahoga Distance Matrix as well.
+
+```
+
+Problem: 
+> Cuyahoga_Delinquents_Geo$geometry[[74]]
+MULTIPOLYGON EMPTY
+> Cuyahoga_Delinquents_Geo$geometry[[73]]
+MULTIPOLYGON (((-81.75264 41.48498, -81.75272 41.48475, -81.75307 41.48481, -81.75325 41.48485, -81.75318 41.48507, -81.75264 41.48498)))
+Looks like Cuyahoga_Delinquents_Geo$geometry
+Geometry set for 96236 features  (with 7024 geometries empty)
+It appears that some parcels such as 001-15-805C have no polygon because they are condos. 
+And therefore st_distance(Cuyahoga_Delinquents_Geo$geometry[[74]],Cuyahoga_geo_millions$geometry[[1]]) yields NA. 
+
+However, that only means 4,685,008 of 601,285,648 distances couldn't be computed, or 0.007791651, less than 1%. So we are going to exclude them from our calculations, but wanted to note that. 
+
+```{r}
+Cuyahoga_Distance_Matrix <- Cuyahoga_Distance_Matrix %>% 
+  filter(!is.na(V1))
+
+Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix1 %>% 
+  filter(!is.na(`12123003`))
+
+```
+
+
+Also, this means that 7024 properties are  not available for analysis, which is about 7% of the properties behind on their taxes. But none of these properties ended up in the Land Bank. 
+
+```{r}
+Empty_Delinquents <- Cuyahoga_Delinquents_Geo %>% filter(st_is_empty(geometry))
+
+sum(Empty_Delinquents$Land_Bank)
+```
+
+Looks like none of these properties end up the the Cuyahgoa GIS database because they are associated with other parcels. 
+
+
+
+
+
+
+Okay now let's do some math to add distance to our machine learning set. 
+
+
+First, let's add the parcel number
+```{r}
+Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>% 
+  mutate(parcel_id=(sub("-","",PROPERTY_NUMBER,fixed = TRUE))) %>% 
+  mutate(parcel_id=(sub("-","",parcel_id,fixed = TRUE)))
+```
+
+And change the 
+
+
+Then writing a function to find the sum, in meters, of the property to all other valuable properties.  
+
+```{r}
+Cuyahoga_Distance_Matrix_Totals <- Cuyahoga_Distance_Matrix %>% 
+ janitor::adorn_totals(where= "row", na.rm = TRUE, name="Total_Distance")
+
+```
+
+
+Doing this the other way, as this is causing a lot of issues to transpose it: 
+
+```{r}
+library(lwgeom)
+
+sf::sf_use_s2(FALSE)
+
+Cuyahoga_Distance_Matrix <- as.data.frame(st_distance(Cuyahoga_geo_millions$geometry,Cuyahoga_Delinquents_Geo$geometry)) #This takes quite a while just FYI, like several days
+```
+
+Making a similar matrix with the column names added, so we don't get confused: 
+
+```{r}
+#Sets column names
+  
+Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix %>% 
+  `colnames<-`(Cuyahoga_Delinquents_Geo$PROPERTY_NUMBER) %>% 
+  
+  #Adds a column containing names so that each row now also has a name
+  #cbind(name = Cuyahoga_geo_millions$parcel_id) 
+#Cuyahoga_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Cuyahoga Distance Matrix as well.
+```
+
+
+
+Let's find the total distance away: 
+
+```{r}
+Cuyahoga_Distance_Matrix_Totals <- Cuyahoga_Distance_Matrix1 %>% 
+  select(-name) %>% 
+ janitor::adorn_totals(where= "col", na.rm = TRUE)
+
+
+```
+
+```{r}
+
+Cuyahoga_Distance_Matrix_Totals <- Cuyahoga_Distance_Matrix_Totals %>% 
+  slice(96237)
+```
+
+Dropping the meters units. Very cool that this is in meters but as we don't need to convert anything it's just making things more complicated.
+```{r}
+library(units)
+Cuyahoga_Distance_Matrix_No_Units <- drop_units(Cuyahoga_Distance_Matrix1)
+
+```
+Finding the distance to all high-value parcels in the county. You can also do this with janitor's adorn_totals but we want to do a few Similar things so this is easier. 
+
+```{r}
+Total_Distance_To_High_Value_Parcels <- Cuyahoga_Distance_Matrix_No_Units %>%                                                       
+  dplyr::summarise_all(~sum(., na.rm = TRUE))
+```
+
+
+
+Finding the number of high-value parcels within 500 meters of the delinquent properties. (Approximately the distance between Al Jenkins' property and the hospital.) 
+
+```{r}
+Number_Near <- Cuyahoga_Distance_Matrix_No_Units %>%                                                                                  
+  dplyr::summarise_all(~sum(.<500, na.rm = TRUE))
+```
+
+And for comparison, also the number twice as far. 
+
+```{r}
+Number_Semi_Near <- Cuyahoga_Distance_Matrix_No_Units %>%                                                                           
+  dplyr::summarise_all(~sum(.<1000, na.rm = TRUE))
+```
+
+```{r}
+Cuyahoga_Distance_Info1 <-Number_Near %>% 
+  select(-name) %>% 
+  pivot_longer("001-02-033":"215-17-001", names_to = "PROPERTY_NUMBER", values_to = "number_of_high_value_properties_within_500m" )
+```
+
+```{r}
+Cuyahoga_Distance_Info2 <-Number_Semi_Near %>% 
+  select(-name) %>% 
+  pivot_longer("001-02-033":"215-17-001", names_to = "PROPERTY_NUMBER", values_to = "number_of_high_value_properties_within_1000m" )
+```
+
+```{r}
+Cuyahoga_Distance_Matrix_Totals <- drop_units(Cuyahoga_Distance_Matrix_Totals)
+
+Cuyahoga_Distance_Info3 <-Cuyahoga_Distance_Matrix_Totals %>% 
+  select(-Total) %>% 
+  slice_tail(n=1) %>% 
+  pivot_longer("001-02-033":"215-17-001", names_to = "PROPERTY_NUMBER", values_to = "Sum_of_distance_to_high_value_properties" )
+```
+
+
+Adding them together
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info <- left_join(Cuyahoga_Delinquents, Cuyahoga_Distance_Info1,  by="PROPERTY_NUMBER")
+Cuyahoga_Delinquents_With_Distance_Info <- left_join(Cuyahoga_Delinquents_With_Distance_Info, Cuyahoga_Distance_Info2,  by="PROPERTY_NUMBER")
+Cuyahoga_Delinquents_With_Distance_Info <- left_join(Cuyahoga_Delinquents_With_Distance_Info, Cuyahoga_Distance_Info3,  by="PROPERTY_NUMBER")
+```
+
+
+###Machine Learning take two: with distance info
+
+First, classification description didn't seem to be a good factor. Let's look into those: 
+Which kids of properties are getting foreclosed  upon?
+
+```{r}
+Cuyahoga_Delinquents_Kinds <- Cuyahoga_Delinquents_With_Distance_Info  %>% 
+  group_by(CLASSIFICATION_DESCR) %>% 
+  summarize(Total_Gov__Foreclosure=sum(Land_Bank), Total_Behind=n()) %>% 
+  ungroup() %>% 
+  group_by(CLASSIFICATION_DESCR) %>% 
+  mutate(Percent=Total_Gov__Foreclosure/sum(Total_Behind))
+            
+datatable(Cuyahoga_Delinquents_Kinds)
+  
+```
+Two interesting things here. First, it appears there are 3 Land Bank Descriptions in the use code: 
+
+```{r}
+unique(Cuyahoga_Delinquents_With_Distance_Info$CLASSIFICATION_DESCR)
+```
+"City  (LAND BANKS)", "COUNTY LAND BANK" and "LAND REUTILIZATION (LAND BANKS)". So we have been undercounting some land bank properties when we got rid of duplicates. 
+
+Fixing that. 
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info <- Cuyahoga_Delinquents_With_Distance_Info %>% 
+  mutate(Gov_Foreclosure=ifelse(CLASSIFICATION_DESCR=="City  (LAND BANKS)"|CLASSIFICATION_ID=="COUNTY LAND BANK"|CLASSIFICATION_ID=="LAND REUTILIZATION (LAND BANKS)",1,Land_Bank))
+```
+
+Next, it seems no condos or house trailers are getting flagged here, even though they are the fourth and ninth highest in number.  
+```{r}
+
+Cuyahoga_Delinquents_Kinds <- Cuyahoga_Delinquents_With_Distance_Info  %>% 
+  group_by(CLASSIFICATION_DESCR) %>% 
+  summarize(Total_Gov__Foreclosure=sum(Gov_Foreclosure), Total_Behind=n()) %>% 
+  ungroup() %>% 
+  group_by(CLASSIFICATION_DESCR) %>% 
+  mutate(Percent=Total_Gov__Foreclosure/sum(Total_Behind))
+            
+datatable(Cuyahoga_Delinquents_Kinds)
+  
+```
+
+How much do they owe relative to other properties? 
+```{r}
+House_Trailers_Owed <- Cuyahoga_Delinquents_With_Distance_Info %>% filter(CLASSIFICATION_DESCR=="House trailer")
+Single_Fam_Dwelling_Owed <- Cuyahoga_Delinquents_With_Distance_Info %>% filter(CLASSIFICATION_DESCR=="SINGLE FAMILY DWELLING")
+
+summary(House_Trailers_Owed$owed_as_percentage_of_lot_value)
+summary(Single_Fam_Dwelling_Owed$owed_as_percentage_of_lot_value)
+
+```
+
+Next, we are going to take out the properties that are no longer in the map database. It looks like these properties are now listed with other properties. 
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo <- filter(Cuyahoga_Delinquents_With_Distance_Info, !is.na(Sum_of_distance_to_high_value_properties))
+```
+
+
+```{r}
+ggplot(Cuyahoga_Delinquents_With_Distance_Info_Geo, aes(x=GRAND_TOTAL_OWED))+
+  geom_histogram(binwidth = 100000)
+  
+```
+
+
+
+
+Okay step one: choosing an appropriate model. We want to predict here whether a property will end up in the land bank or not. So we are looking to build a Classification model. 
+
+So first, we have very few Land bank properties versus delinquent properties overall. And this, of course, is our whole story. Who has the power to decide where this will happen? But we will have to take this into account and try to split our training and test sets with an equal number of land bank properties. 
+
+Next, we are going to split the dataset into training and testing models, evenly diving the sections between the Land Bank and non-land bank properties. 
+
+```{r}
+stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor)
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+  #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, -GRAND_TOTAL_BALANCE
+           )
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+Number_Nearest <- function(Yo.Variable){ 
+  this <- paste0("Cuyahoga_Distance_Matrix_No_Units$`",Yo.Variable,"`")
+  this <- is.namethis(this)
+  sum((this<500), na.rm = TRUE)
+}
+
+
+Cuyahoga_Nearest <- map(Cuyahoga_Delinquents$PROPERTY_NUMBER, sum_near)
+
+```
+
+
+```{r}
+Cuyahoga_Delinquents_With_Distance <- Cuyahoga_Delinquents %>% 
+  mutate(Number_Nearest=sum(paste0("Cuyahoga_Distance_Matrix_No_Units$`",PROPERTY_NUMBER,"`")<500, na.rm=TRUE))
+```
+
+
+
+```{r}
+sum_near <- function(Yo.Variable){
+  sum(Yo.Variable<500, na.rm = TRUE)
+}
+```
+
+
 
 ```{r}
 

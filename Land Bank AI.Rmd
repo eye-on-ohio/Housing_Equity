@@ -964,11 +964,11 @@ summary(Land_Bank_Recipients_Without_interlandbank_transfers)
 
 
 ```{r}
-Land_Bank_Recipients_Without_interlandbank_transfers <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
-  mutate(type=if_else(str_detect(GRANTEE1,"development|DEVELOPMENT|LLC|LTD|INC|Inc|COMPANY|CORPORATION"),"Corp/Development Group","person, church, etc"))
+Land_Bank_Recipients_By_Type <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
+  mutate(type=if_else((str_detect(GRANTEE1,",")&!str_detect(GRANTEE1,"LLC")),"person","group"))
 
 
-ggplot(Land_Bank_Recipients_Without_interlandbank_transfers)+
+ggplot(Land_Bank_Recipients_By_Type)+
   aes(x=year(Transfer_date),fill=type)+
   geom_bar()+
   facet_wrap(~type)
@@ -1322,14 +1322,96 @@ Next, we are going to take out the properties that are no longer in the map data
 Cuyahoga_Delinquents_With_Distance_Info_Geo <- filter(Cuyahoga_Delinquents_With_Distance_Info, !is.na(Sum_of_distance_to_high_value_properties))
 ```
 
+What's the rough distribution?
 
 ```{r}
 ggplot(Cuyahoga_Delinquents_With_Distance_Info_Geo, aes(x=GRAND_TOTAL_OWED))+
-  geom_histogram(binwidth = 100000)
+  geom_histogram()+
+  stat_bin(binwidth = 100000, geom="text",aes(label=..count..), position = position_stack(vjust = .5))
+  
+```
+Looks like most owe less than $100,000 to start. Let's look closer at the distribution of that. 
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(GRAND_TOTAL_OWED<100000) %>% 
+ggplot(aes(x=GRAND_TOTAL_OWED))+
+  geom_histogram()+
+  stat_bin(binwidth = 5000, geom="text",aes(label=..count..), position = position_stack(vjust = .5))
   
 ```
 
 
+What is the distribution of Land Bank properties?
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==1) %>% 
+ggplot(aes(x=GRAND_TOTAL_OWED))+
+  geom_histogram()+
+  stat_bin(binwidth = 10000, geom="text",aes(label=..count..), position = position_stack(vjust = .5))
+  
+```
+Looks like only a few over $210,000. 
+
+
+
+    672-25-001
+    EAST CLEVELAND LAND REUTILIZATION PROGRAM
+    14600 EUCLID AVE
+    EAST CLEVELAND, OH. 44112
+
+An apartment building that was taken over. 
+
+
+
+    126-21-014
+    THE ZONE, LLC.
+    2800 E 90 AVE
+    CLEVELAND, OH. 44104
+
+
+Yup looks like a warehouse that didn't pay taxes for years.Near a lot of construction on 90th.
+
+
+Primary Owner
+CITY OF CLEVELAND HEOIGHTS LAND REUTILIZATION PROGRAM
+Property Address
+1912 So Taylor RD Cleveland Hts,OH 44118
+Tax Mailing Address
+CITY OF CLEVELAND HEOIGHTS LAND REUTILIZATION 1900 S TAYLOR RD CLEVELAND, OH 44121
+Legal Description
+16 MONROE &S/L2 EP & 3 EP BUT TRI 0001 EP
+Property Class
+GENERAL RETAIL WITH WALK-UP APARTMENTS
+Parcel Number
+684-26-012
+Taxset  
+Cleveland Hts.
+
+Yup apartments that didn't pay taxes for years. 
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==1) %>% 
+  filter(GRAND_TOTAL_OWED<100000) %>% 
+ggplot(aes(x=GRAND_TOTAL_OWED))+
+  geom_histogram()+
+  stat_bin(binwidth = 10000, geom="text",aes(label=..count..), position = position_stack(vjust = .5))
+  
+```
+
+Of all foreclosures, how much was owed?
+
+
+
+```{r}
+summary(Cuyahoga_Delinquents_With_Distance_Info_Geo$GRAND_TOTAL_OWED)
+```
+what about the percent owed?
+
+```{r}
+summary(Cuyahoga_Delinquents_With_Distance_Info_Geo$owed_as_percentage_of_lot_value)
+```
 
 
 Okay step one: choosing an appropriate model. We want to predict here whether a property will end up in the land bank or not. So we are looking to build a Classification model. 
@@ -1340,6 +1422,288 @@ Next, we are going to split the dataset into training and testing models, evenly
 
 ```{r}
 stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
+  #filter(Certified_Total_Value>21900&Certified_Total_Value<105100) %>% 
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor)
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+  select(Gov_Foreclosure, owed_as_percentage_of_lot_value) 
+    #select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties,  -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID,  -Certified_Total_Value,  -Close_to_high_value_properties, -number_of_high_value_properties_within_500m, owed_as_percentage_of_lot_value
+           
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
+
+
+
+Of the parcels taken over by the land bank, how many are in majority white districts? How does that compare the number of delinquent taxpayers who are in majority white districts?
+```{r}
+prop.table(table(Cuyahoga_Delinquents_With_Distance_Info_Geo$is_school_district_majority_white, Cuyahoga_Delinquents_With_Distance_Info_Geo$Gov_Foreclosure))
+```
+On the left, in the column, 0 represents the school district is not majority white, and 1 represents the school district is. 
+
+On top, 0 represents that the property is not a Land bank (or property forfeited to the government.) And 1 is yes.
+
+So 75% of properties were not foreclosed upon and were in minority districts. About 22% of properties were in white district and were not foreclosed upon. Less than a thousandth of all properties were both in a white school district and were foreclosed upon. Three percent of all properties were foreclosed upon and were in a minority district. 
+
+
+What percentage of delinquent properties are in majority white school districts? What percentage of properties that go to the land bank are in majority white school districts?
+```{r}
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% group_by(Gov_Foreclosure) %>% count(is_school_district_majority_white)
+```
+
+In majority white school districts, there were 19,515 properties (19443+72). 0.00368947, or 72 out of the 19515 went to white districts. In majority black districts, there were 69,967 properties.(66906+2791). 2,791 of those went to the land bank, or 4 percent of those properties. 
+
+
+
+
+How many expensive parcels within 500 m does the average/median tax delinquent property have? How many do Land Bank properties have?
+
+Since the greatest factor is the grand total owed, we are going to take the amount of tax delinquent into account. 
+
+
+What's the median owed as a percentage of the lot value? (Since we can't get how many years someone owed money on a property, this is a good proxy for the amount of time a property stood vacant.
+
+
+```{r}
+summary(Cuyahoga_Delinquents_With_Distance_Info_Geo$owed_as_percentage_of_lot_value)
+```
+What's the standard deviation?
+
+```{r}
+sd(Cuyahoga_Delinquents_With_Distance_Info_Geo$owed_as_percentage_of_lot_value)
+```
+Let's look at properies around the mean. This is all properties: 
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(owed_as_percentage_of_lot_value>(mean(owed_as_percentage_of_lot_value))) %>% 
+  summarize(mean(number_of_high_value_properties_within_500m))
+```
+
+Then properties that weren't foreclosed on
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(owed_as_percentage_of_lot_value>(mean(owed_as_percentage_of_lot_value))) %>% 
+  filter(Gov_Foreclosure==0) %>% 
+  summarize(mean(number_of_high_value_properties_within_500m))
+```
+
+And properties that were: 
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(owed_as_percentage_of_lot_value>(mean(owed_as_percentage_of_lot_value))) %>%  
+  filter(Gov_Foreclosure==1) %>% 
+  summarize(mean(number_of_high_value_properties_within_500m))
+```
+
+```{r}
+summary(Cuyahoga_Delinquents_With_Distance_Info_Geo$GRAND_TOTAL_OWED)
+```
+What's the standard deviation?
+
+```{r}
+sd(Cuyahoga_Delinquents_With_Distance_Info_Geo$GRAND_TOTAL_OWED)
+```
+Let's look at properies around the mean. This is all properties: 
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(GRAND_TOTAL_OWED>(mean(GRAND_TOTAL_OWED, na.rm=TRUE)-sd(GRAND_TOTAL_OWED)&GRAND_TOTAL_OWED<mean(GRAND_TOTAL_OWED, na.rm=TRUE)+sd(GRAND_TOTAL_OWED))) %>% 
+  summarize(mean(number_of_high_value_properties_within_500m, na.rm=TRUE))
+```
+
+Then properties that weren't foreclosed on
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(GRAND_TOTAL_OWED>(mean(GRAND_TOTAL_OWED, na.rm=TRUE)-sd(GRAND_TOTAL_OWED)&GRAND_TOTAL_OWED<mean(GRAND_TOTAL_OWED, na.rm=TRUE)+sd(GRAND_TOTAL_OWED))) %>% 
+  filter(Gov_Foreclosure==0) %>% 
+  summarize(mean(number_of_high_value_properties_within_500m))
+```
+
+And properties that were: 
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(GRAND_TOTAL_OWED>(mean(GRAND_TOTAL_OWED, na.rm=TRUE)-sd(GRAND_TOTAL_OWED)&GRAND_TOTAL_OWED<mean(GRAND_TOTAL_OWED, na.rm=TRUE)+sd(GRAND_TOTAL_OWED))) %>%   
+  filter(Gov_Foreclosure==1) %>% 
+  summarize(mean(number_of_high_value_properties_within_500m))
+```
+
+
+
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  summarize(mean(is_school_district_majority_white))
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==0) %>% 
+  summarize(mean(is_school_district_majority_white))
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==1) %>% 
+  summarize(mean(is_school_district_majority_white))
+```
+
+
+
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  summarize(mean(is_school_district_majority_disadvantaged))
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==0) %>% 
+  summarize(mean(is_school_district_majority_disadvantaged))
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==1) %>% 
+  summarize(mean(is_school_district_majority_disadvantaged))
+```
+
+What happens when we take out the distances to high-value properties?
+
+
+
+```{r}
+stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
     mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
     mutate_if(is.character, factor)
 
@@ -1347,8 +1711,162 @@ stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
   #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
-    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, -GRAND_TOTAL_BALANCE
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, -GRAND_TOTAL_BALANCE, -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE, -number_of_high_value_properties_within_1000m, -Certified_Total_Value, -is_school_district_majority_disadvantaged, -is_school_district_majority_white, -number_of_high_value_properties_within_500m, -number_of_high_value_properties_within_1000m
            )
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
+
+
+
+
+```{r}
+stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor)
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+  #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, -GRAND_TOTAL_BALANCE, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE,  -Certified_Total_Value, -is_school_district_majority_disadvantaged, -is_school_district_majority_white, -owed_as_percentage_of_lot_value, -number_of_high_value_properties_within_500m
+           )
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
 
 # Split the data into training and testing sets
 set.seed(1234)
@@ -1492,42 +2010,6 @@ datatable(tidy(stack_glm))
 
 
 
-
-
-```{r}
-Number_Nearest <- function(Yo.Variable){ 
-  this <- paste0("Cuyahoga_Distance_Matrix_No_Units$`",Yo.Variable,"`")
-  this <- is.namethis(this)
-  sum((this<500), na.rm = TRUE)
-}
-
-
-Cuyahoga_Nearest <- map(Cuyahoga_Delinquents$PROPERTY_NUMBER, sum_near)
-
-```
-
-
-```{r}
-Cuyahoga_Delinquents_With_Distance <- Cuyahoga_Delinquents %>% 
-  mutate(Number_Nearest=sum(paste0("Cuyahoga_Distance_Matrix_No_Units$`",PROPERTY_NUMBER,"`")<500, na.rm=TRUE))
-```
-
-
-
-```{r}
-sum_near <- function(Yo.Variable){
-  sum(Yo.Variable<500, na.rm = TRUE)
-}
-```
-
-
-
-```{r}
-
-```
-
-
-
 Let's trace the actual values against the predicted ones. 
 
 ##Allen County
@@ -1553,5 +2035,302 @@ Allen_County_LB_Properties <- rio::import("Allen County Land Bank Properties 1-1
 ```
 
 
+Now bringing in Allen County's delinquent list. 
+
+```{r}
+Allen_Delinquent <- rio::import("Allen County 2021 03-12 total dlq taxpayer.xls")
+```
+
+To ask
+Why are there two columns named prior delinquent real estate tax? 
+What is the unnamed column?
+
+This is amazing, though, there are tax delinquent properties that go way back, such as [this property labeled as delinquent in 1982.](http://allencountyohpropertytax.com/Tax.aspx?mpropertynumber=47-0610-03-001.000&p=47061003001.000)
+
+What is the oldest delinquency?
+
+```{r}
+min(Allen_Delinquent$`CertDlq Year`)
+```
+
+
+```{r}
+Allen_Delinquent <- Allen_Delinquent %>% 
+  mutate(PARCEL=Parcel)
+                             
+Allen_County_LB_Properties <- Allen_County_LB_Properties %>% 
+mutate(PARCEL=` Parcel Number`)
+
+
+Allen_County_Delinquent_Geo <- Allen_Geo %>% 
+  filter(PARCEL %in% Allen_County_LB_Properties$PARCEL|PARCEL %in% Allen_Delinquent $PARCEL)
+```
+
+
+Where are the high-value properties?
+
+```{r}
+Allen_Geo_Millions <- Allen_Geo %>% filter(MKTTOTVAL>10000000)
+```
+
+
+How close are they to our properties?
+
+```{r }
+library(lwgeom)
+
+sf::sf_use_s2(FALSE)
+
+Allen_Distance_Matrix <- as.data.frame(st_distance(  Allen_Geo_Millions$geometry, Allen_County_Delinquent_Geo$geometry,)) #This takes quite a while just FYI
+
+
+
+  #Sets column names
+  
+Allen_Distance_Matrix1 <- Allen_Distance_Matrix %>% 
+  `colnames<-`(Allen_County_Delinquent_Geo$PARCEL ) %>% 
+  
+  #Adds a column containing names so that each row now also has a name
+  cbind(name = Allen_Geo_Millions$PARCEL  ) 
+#Cuyahoga_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Cuyahoga Distance Matrix as well.
+
+```
+
+
+
+Removing the units (which interestingly here are in feet.) 
+
+```{r}
+library(units)
+Allen_Distance_Matrix_No_Units <- drop_units(Allen_Distance_Matrix1)
+```
+
+
+Finding the number of high-value parcels within half a mile of the delinquent properties. 
+
+```{r}
+Allen_Number_Near <- Allen_Distance_Matrix_No_Units %>%                                                                                  
+  dplyr::summarise_all(~sum(.<2640, na.rm = TRUE))
+```
+
+And for comparison, also the number twice as far. 
+
+```{r}
+Allen_Number_Semi_Near <- Allen_Distance_Matrix_No_Units %>%                                                                           
+  dplyr::summarise_all(~sum(.<5280, na.rm = TRUE))
+```
+
+```{r}
+Allen_Distance_Info1 <-Allen_Number_Near %>% 
+  select(-name) %>% 
+  pivot_longer("18-3300-04-004.000":"48-3600-01-001.000", names_to = "PARCEL", values_to = "number_of_high_value_properties_within_half_mile" )
+```
+
+```{r}
+Allen_Distance_Info2 <-Allen_Number_Semi_Near %>% 
+  select(-name) %>% 
+  pivot_longer("18-3300-04-004.000":"48-3600-01-001.000", names_to = "PARCEL", values_to = "number_of_high_value_properties_within_mile" )
+```
+
+
+Adding them together
+
+```{r}
+Allen_Delinquents_With_Distance_Info <- left_join(Allen_County_Delinquent_Geo, Allen_Distance_Info1,  by="PARCEL")
+Allen_Delinquents_With_Distance_Info <- left_join(Allen_Delinquents_With_Distance_Info, Allen_Distance_Info2,  by="PARCEL")
+```
+
+Which properties were just near expensive properties, period?
+```{r}
+Allen_Delinquents_With_Distance_Info  <- Allen_Delinquents_With_Distance_Info %>% 
+  mutate(Within_half_mile=if_else(number_of_high_value_properties_within_half_mile>=1,1,0)) %>% 
+ mutate(Within_mile=if_else(number_of_high_value_properties_within_mile>=1,1,0))          
+```
+
+
+
+
+And since we have it, let's look at the date it was certified delinquent
+
+```{r}
+Allen_Delinquents_With_Distance_Info$Year_Delinquent <- Allen_Delinquent$`CertDlq Year`[match(Allen_Delinquents_With_Distance_Info$PARCEL,Allen_Delinquent$PARCEL)]
+```
+
+And let's measure that in time
+
+```{r}
+Allen_Delinquents_With_Distance_Info <- Allen_Delinquents_With_Distance_Info %>% 
+  mutate(Years_Since_Delinquent=2021-Year_Delinquent)
+```
+
+
+Which are land bank properties?
+
+```{r}
+Allen_Delinquents_With_Distance_Info <- Allen_Delinquents_With_Distance_Info %>% 
+  mutate(Gov_Foreclosure=if_else(PARCEL %in% Allen_County_LB_Properties$PARCEL, 1,0))
+```
+
+
+How much do people owe as a percentage of what their place is worth? This ended up not working out because we don't know how much properties owed when they went into the land bank or when they were certified tax delinquent. 
+
+
+
+
+
+And now, the machine learning part. 
+
+
+```{r}
+stack_overflow <- as.data.frame(Allen_Delinquents_With_Distance_Info)
+
+
+stack_overflow <- stack_overflow %>% 
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor) %>% 
+   mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+  #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
+    select(MKTTOTVAL, Gov_Foreclosure)
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
 
 

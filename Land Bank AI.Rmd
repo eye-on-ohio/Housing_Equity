@@ -5,7 +5,7 @@ date: "Summer 2021"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=TRUE}
 library(dplyr)
 library(ggplot2)
 library(tidyverse)
@@ -346,7 +346,7 @@ Cuyahoga_Properties_plotted_all
 Some parcels were subsumed into other parcels that had never been taken over by the land bank, some became part of other land bank properties, etc. 
 
 
-Wheare are political donors in relation to this map? Note: Some listed home and some listed their work adddress. 
+Where are political donors in relation to this map? Note: Some listed home and some listed their work adddress. 
 
 ```{r}
 setwd("~/Code/Blue/Housing_Equity/Political Contributions")
@@ -535,7 +535,8 @@ So 2,362 properties went to the government, but that's only 2% of the properties
 
 Next: we need to bring in the categories of each school district. 
 
-This is from the Ohio Department of Education. [There's no direct download link, you have to choose what you want.](https://reports.education.ohio.gov/report/report-card-data-district-enrollment-by-student-demographic)
+This is from the Ohio Department of Education. [There's no direct download link, you have to choose what you want.]
+)
 
 They don't allow you to download all the info at once by district, or if they do we couldn't figure it out. But anyway, this takes every school in Cuyahoga. (So we searched for "Cuyahoga," clicked on the button next to each one, then downloaded.) 
 
@@ -902,54 +903,6 @@ n<-names(data)
 form1 = as.formula(paste("Land_Bank ~", paste(n[!n %in% "Land_Bank"], collapse = " + ")))
 ```
 
-Here we are going to fit a multiple linear regression model for the number of Land bank properties using the rest of the variables as explanatory variables (predictors):
-
-
-
-```{r}
-MLModel = lm(form1,data =data)
-
-MLModel
-```
-
-Let's see how well our model did. 
-
-```{r}
-summary(MLModel)
-```
-This is is terrible R value. So these factors do not matter as much. 
-
-
-Which variables are particularly important? 
-
-```{r}
-data <- Cuyahoga_Delinquents %>%
-    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_DESCR)
-
-names(data)
-
-#writing a function to automate writing the formula: 
-n<-names(data)
-form1 = as.formula(paste("Land_Bank ~", paste(n[!n %in% "Land_Bank"], collapse = " + ")))
-```
-
-Here we are going to fit a multiple linear regression model for the number of Land bank properties using the rest of the variables as explanatory variables (predictors):
-
-
-
-```{r}
-MLModel = lm(form1,data =data)
-
-MLModel
-```
-
-Let's see how well our model did. 
-
-```{r}
-summary(MLModel)
-```
-
-Not that well. So it looks like these factors aren't that important. 
 
 Let's see where properties are in relation to future developments. 
 
@@ -1429,7 +1382,7 @@ stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
 
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
-  select(Gov_Foreclosure, owed_as_percentage_of_lot_value) 
+  select(Gov_Foreclosure, is_school_district_majority_white, number_of_high_value_properties_within_500m, owed_as_percentage_of_lot_value) 
     #select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties,  -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID,  -Certified_Total_Value,  -Close_to_high_value_properties, -number_of_high_value_properties_within_500m, owed_as_percentage_of_lot_value
            
 
@@ -1570,6 +1523,50 @@ datatable(tidy(stack_glm))
 
 ```
 
+How much do properties owe? 
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED))
+ 
+ Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED))
+  
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value))
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
+
+  Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(mean(owed_as_percentage_of_lot_value))
+  
+  Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(median(owed_as_percentage_of_lot_value))
+ 
+   Cuyahoga_Delinquents_With_Distance_Info_Geo %>% count(Gov_Foreclosure)
+
+ Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(mean(GRAND_TOTAL_OWED))
+ 
+ 
+Cuyahoga_Delinquents_With_Distance_Info %>%  #different because trailers don't have geographic info
+filter(CLASSIFICATION_DESCR=="House trailer") %>% count()
+
+Cuyahoga_Delinquents_With_Distance_Info %>%  #different because trailers don't have geographic info
+filter(CLASSIFICATION_DESCR=="House trailer") %>% summarize(median(owed_as_percentage_of_lot_value))
+
+Cuyahoga_Delinquents_With_Distance_Info %>%  #different because trailers don't have geographic info
+filter(CLASSIFICATION_DESCR=="House trailer") %>% summarize(mean(owed_as_percentage_of_lot_value))
+
+Cuyahoga_Delinquents_With_Distance_Info %>%  #different because trailers don't have geographic info
+filter(CLASSIFICATION_DESCR=="House trailer") %>% summarize(mean(GRAND_TOTAL_OWED))
+ 
+ 
+Cuyahoga_Delinquents_With_Distance_Info %>%  #different because trailers don't have geographic info
+filter(CLASSIFICATION_DESCR=="House trailer") %>% summarize(median(GRAND_TOTAL_OWED))
+ 
+```
+
+
+
+
+
+
+
 
 
 Of the parcels taken over by the land bank, how many are in majority white districts? How does that compare the number of delinquent taxpayers who are in majority white districts?
@@ -1589,9 +1586,52 @@ What percentage of delinquent properties are in majority white school districts?
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% group_by(Gov_Foreclosure) %>% count(is_school_district_majority_white)
 ```
 
-In majority white school districts, there were 19,515 properties (19443+72). 0.00368947, or 72 out of the 19515 went to white districts. In majority black districts, there were 69,967 properties.(66906+2791). 2,791 of those went to the land bank, or 4 percent of those properties. 
+In majority white school districts, there were 19,515 properties (19443+72). 0.00368947, or 72 out of the 19515 went to white districts. In minority districts, there were 69,967 properties.(66906+2791). 2,791 of those went to the land bank, or 4 percent of those properties. 
+
+But that doesn't take into account how much those properties owed. 
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(owed_as_percentage_of_lot_value))
 
 
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(Certified_Total_Value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(Certified_Total_Value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(Certified_Total_Value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(Certified_Total_Value))
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(GRAND_TOTAL_OWED))
+```
+In districts where the majority of students were white, delinquent owners owed an average of 6.6% of their lot value. The median was 1.5%. In minority districts, delinquent owners were behind on average for 64.7% of their lot value, with a median of 4.7%. 
+
+In terms of absolute numbers, delinquent proeprties in majority white districts were valued at an average $278,615, with a median of $154,900. In minority districts, the median was $37,500 and the average was $92,419.
+
+Homes in white districts owed an average of $10,122 and a median of $5,041. In minority districts they owed an average of $9,040 and a median $2,960.
+
+
+```{r}
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED))
+
+
+
+
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED))
+```
+Homes in majority white districts and in the land bank (or foreclosed upon by the government) owed an average of 130% of their lot value, with a median of 49.8% of their lot value. Or $22,974 average ($10,637 median.)
+
+Homes in minority districts and in the land bank (or foreclosed upon by the government) owed an average of 391% of their lot value, (with a median of 92%) or a total value of $24,162 average (median $15,804.)
 
 
 How many expensive parcels within 500 m does the average/median tax delinquent property have? How many do Land Bank properties have?
@@ -1698,12 +1738,13 @@ Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
   summarize(mean(is_school_district_majority_disadvantaged))
 ```
 
-What happens when we take out the distances to high-value properties?
+###Looking at Race
 
 
 
 ```{r}
 stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
+  filter(owed_as_percentage_of_lot_value>.51) %>% 
     mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
     mutate_if(is.character, factor)
 
@@ -1711,7 +1752,7 @@ stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
   #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
-    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, -GRAND_TOTAL_BALANCE, -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE, -number_of_high_value_properties_within_1000m, -Certified_Total_Value, -is_school_district_majority_disadvantaged, -is_school_district_majority_white, -number_of_high_value_properties_within_500m, -number_of_high_value_properties_within_1000m
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, GRAND_TOTAL_BALANCE, -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE, -number_of_high_value_properties_within_1000m, -Certified_Total_Value, -is_school_district_majority_disadvantaged, is_school_district_majority_white, number_of_high_value_properties_within_500m, -number_of_high_value_properties_within_1000m, -Close_to_high_value_properties
            )
 
 #stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
@@ -2026,24 +2067,47 @@ head(Allen_Geo)
 
 ```
 
+Column info [can be found here.](https://gis.allencountyohio.com/arcgis/rest/services/SanitaryMobile/FeatureServer/12)
+
 Now we are going to bring in the Land Bank Parcels for the past few years. 
 
 Through a FOIA: 
 
 ```{r}
 Allen_County_LB_Properties <- rio::import("Allen County Land Bank Properties 1-1-16 to 7-1-21.xlsx")
+Allen_County_LB_Properties_With_Amount_Owed <- rio::import("Allen Land Bank Properties with Delinquency.xlsx")
+
+
+Allen_County_LB_Properties$Delinquency_Amount <- Allen_County_LB_Properties_With_Amount_Owed$`Delinquency Amount`[match(Allen_County_LB_Properties$PARCEL,Allen_County_LB_Properties_With_Amount_Owed$PARCEL)]
 ```
+Note, we actually have two here: the LB properties which has data on where they go them and how they were disposed, and the list that shows the amount owed. Some didn't owe anything and were just given to the land bank.
+
+
+
+When were Land Bank Properties acquired?
+
+```{r}
+ggplot(Allen_County_LB_Properties, aes(x=year(ACQUIRE)))+
+         geom_bar()
+```
+So this is interesting: There are a few from 2016 and 2018, a bunch in 2018 and not much after that.
+
 
 
 Now bringing in Allen County's delinquent list. 
 
 ```{r}
-Allen_Delinquent <- rio::import("Allen County 2021 03-12 total dlq taxpayer.xls")
+Allen_Delinquent <- rio::import("Allen County 2021 03-12 total dlq taxpayer.xlsX")
+
+Allen_Delinquent_2016 <- rio::import("Allen Prosecutor Certified Delq List - Parcles Eligible for Foreclosure 2016.xlsx")
+Allen_Delinquent_2017 <- rio::import("Allen Prosecutor DelqCertList - parcels eligible for foreclosure 2017.xlsx")
+
+Allen_Delinquents_2016_2017 <- rbind(Allen_Delinquent_2016, Allen_Delinquent_2017)
 ```
 
-To ask
-Why are there two columns named prior delinquent real estate tax? 
-What is the unnamed column?
+This is all the delinquents and when they were certified. 
+
+
 
 This is amazing, though, there are tax delinquent properties that go way back, such as [this property labeled as delinquent in 1982.](http://allencountyohpropertytax.com/Tax.aspx?mpropertynumber=47-0610-03-001.000&p=47061003001.000)
 
@@ -2052,18 +2116,112 @@ What is the oldest delinquency?
 ```{r}
 min(Allen_Delinquent$`CertDlq Year`)
 ```
+What is the distribution like? 
 
 
 ```{r}
-Allen_Delinquent <- Allen_Delinquent %>% 
-  mutate(PARCEL=Parcel)
-                             
-Allen_County_LB_Properties <- Allen_County_LB_Properties %>% 
-mutate(PARCEL=` Parcel Number`)
+ggplot(Allen_Delinquent, aes(x=`CertDlq Year`))+
+  geom_bar()
+```
+Okay so this makes sense: most people aren't that behind on their taxes and just pay it off. 
 
 
-Allen_County_Delinquent_Geo <- Allen_Geo %>% 
-  filter(PARCEL %in% Allen_County_LB_Properties$PARCEL|PARCEL %in% Allen_Delinquent $PARCEL)
+```{r}
+datatable(Allen_Delinquent %>% count(`CertDlq Year`))
+```
+
+How many were delinquent before 2016? 
+
+```{r}
+nrow(filter(Allen_Delinquent, `CertDlq Year`<2016))
+```
+
+Okay so really important to note here, we have the 2021 delinquent list AND it shows the original year that someone was certified delinquent. For example, parcels lableled 2015 didn't pay all of 2014 and were still delinquent by 2021. 
+
+So for our purposes, we are going to take the parcels that were certified delinquent before 2020 and were still delinquent in 2021. (Our dataset just has 2019 and before.) 
+
+Because age can make something more vulnerable to pests, crime, etc, we will calculate the age as well. 
+
+```{r}
+  Allen_County_LB_Properties_With_Amount_Owed$Delinquent_Year <- Allen_Delinquents_2016_2017$DateCertified[match(Allen_County_LB_Properties_With_Amount_Owed$`Parcel Number`, Allen_Delinquents_2016_2017$PropertyNumber)]
+
+
+```
+
+
+Getting stuff into the right format
+```{r}
+Allen_data <- Allen_Delinquent %>% 
+  mutate(Gov_Foreclosure=if_else(Parcel %in% Allen_County_LB_Properties$` Parcel Number`, 1,0))  %>% 
+  #filter(Gov_Foreclosure==0) %>% 
+  select(PARCEL, `Total Tax Due`,Gov_Foreclosure,`CertDlq Year`) %>% 
+  rename(Delinquency_Amount=`Total Tax Due`, Delinquent_Year=`CertDlq Year`)
+
+
+#Since this delinquent list is from 2021, the land bank properties aren't in there anymore. So adding those in.
+Allen_data2 <- Allen_County_LB_Properties_With_Amount_Owed %>% 
+  mutate(Gov_Foreclosure=1) %>% 
+  select(`Parcel Number`, `Delinquency Amount`, Gov_Foreclosure, Delinquent_Year) %>% 
+  rename(Delinquency_Amount=`Delinquency Amount`,PARCEL=`Parcel Number`)
+
+Allen_data <- rbind(Allen_data, Allen_data2)
+
+
+```
+
+```{r}
+Allen_data %>% summarize(sum(Gov_Foreclosure))
+```
+Calculating the age since delinquency
+
+```{r}
+Allen_data$Year_Aquired <- Allen_County_LB_Properties$ACQUIRE[match(Allen_data$PARCEL,Allen_County_LB_Properties$` Parcel Number`)]
+
+Allen_data <- Allen_data %>% 
+ mutate(Year_Aquired_All = ifelse(is.na(Year_Aquired),2021, year(Year_Aquired))) %>% 
+  mutate(Years_Delinquent=Year_Aquired_All-Delinquent_Year)
+                                  
+
+```
+
+
+How many years was (or is) each property delinquent?
+
+```{r}
+ggplot(Allen_data, aes(x=Years_Delinquent, fill=Gov_Foreclosure))+
+  geom_bar()
+```
+So six properties look like they are negative years delinquent. But essentially they went to the land bank, then later they became delinquent again. 
+
+
+
+Let's visualize this. 
+```{r}
+Allen_LB_Geo <- Allen_Geo %>% 
+  filter(PARCEL  %in%  Allen_County_LB_Properties$` Parcel Number`)
+
+Allen_LB_Geo <- st_as_sf(Allen_LB_Geo)
+
+plot(Allen_LB_Geo %>% select(PARCEL, geometry))
+
+```
+And with a background map so we can actually read it. 
+
+```{r}
+Allen_LB_Geo <- st_transform(Allen_LB_Geo, crs = 4326)
+Allen_LB_Geo <- st_zm(Allen_LB_Geo, drop = T, what = "ZM")
+
+
+```
+
+
+```{r}
+Allen_Properties_plotted<- leaflet(data = Allen_LB_Geo) %>% 
+  addTiles() %>% 
+  setView( -84.10603998384539, 40.73151049471383, zoom = 10) %>% #Set to Lima Center
+  addPolygons(data=Allen_LB_Geo$geometry, options = tileOptions(minZoom = 0, maxZoom = 14, continuousWorld = T), popup = Allen_LB_Geo$PARCEL)
+  
+Allen_Properties_plotted
 ```
 
 
@@ -2073,6 +2231,11 @@ Where are the high-value properties?
 Allen_Geo_Millions <- Allen_Geo %>% filter(MKTTOTVAL>10000000)
 ```
 
+```{r}
+Allen_County_Delinquent_Geo <- filter(Allen_Geo, PARCEL %in% Allen_data$PARCEL)
+```
+
+
 
 How close are they to our properties?
 
@@ -2081,7 +2244,7 @@ library(lwgeom)
 
 sf::sf_use_s2(FALSE)
 
-Allen_Distance_Matrix <- as.data.frame(st_distance(  Allen_Geo_Millions$geometry, Allen_County_Delinquent_Geo$geometry,)) #This takes quite a while just FYI
+Allen_Distance_Matrix <- as.data.frame(st_distance(  Allen_Geo_Millions$geometry, Allen_County_Delinquent_Geo$geometry)) #This takes quite a while just FYI
 
 
 
@@ -2123,26 +2286,26 @@ Allen_Number_Semi_Near <- Allen_Distance_Matrix_No_Units %>%
 ```{r}
 Allen_Distance_Info1 <-Allen_Number_Near %>% 
   select(-name) %>% 
-  pivot_longer("18-3300-04-004.000":"48-3600-01-001.000", names_to = "PARCEL", values_to = "number_of_high_value_properties_within_half_mile" )
+  pivot_longer("25-1907-02-007.000":"48-3300-01-002.000", names_to = "PARCEL", values_to = "number_of_high_value_properties_within_half_mile" )
 ```
 
 ```{r}
 Allen_Distance_Info2 <-Allen_Number_Semi_Near %>% 
   select(-name) %>% 
-  pivot_longer("18-3300-04-004.000":"48-3600-01-001.000", names_to = "PARCEL", values_to = "number_of_high_value_properties_within_mile" )
+  pivot_longer("25-1907-02-007.000":"48-3300-01-002.000", names_to = "PARCEL", values_to = "number_of_high_value_properties_within_mile" )
 ```
 
 
 Adding them together
 
 ```{r}
-Allen_Delinquents_With_Distance_Info <- left_join(Allen_County_Delinquent_Geo, Allen_Distance_Info1,  by="PARCEL")
-Allen_Delinquents_With_Distance_Info <- left_join(Allen_Delinquents_With_Distance_Info, Allen_Distance_Info2,  by="PARCEL")
+Allen_data <- left_join(Allen_data, Allen_Distance_Info1,  by="PARCEL")
+Allen_data <- left_join(Allen_data, Allen_Distance_Info2,  by="PARCEL")
 ```
 
 Which properties were just near expensive properties, period?
 ```{r}
-Allen_Delinquents_With_Distance_Info  <- Allen_Delinquents_With_Distance_Info %>% 
+Allen_data <- Allen_data %>% 
   mutate(Within_half_mile=if_else(number_of_high_value_properties_within_half_mile>=1,1,0)) %>% 
  mutate(Within_mile=if_else(number_of_high_value_properties_within_mile>=1,1,0))          
 ```
@@ -2150,30 +2313,45 @@ Allen_Delinquents_With_Distance_Info  <- Allen_Delinquents_With_Distance_Info %>
 
 
 
-And since we have it, let's look at the date it was certified delinquent
+
+So we have the school district for each parcel. Though it's just a number between 203 and 207  with the exception of 6901. So we are going to input the school district shapefile and then see wheich district each is in. 
 
 ```{r}
-Allen_Delinquents_With_Distance_Info$Year_Delinquent <- Allen_Delinquent$`CertDlq Year`[match(Allen_Delinquents_With_Distance_Info$PARCEL,Allen_Delinquent$PARCEL)]
-```
+setwd("Allen_School_Districts/")
 
-And let's measure that in time
 
-```{r}
-Allen_Delinquents_With_Distance_Info <- Allen_Delinquents_With_Distance_Info %>% 
-  mutate(Years_Since_Delinquent=2021-Year_Delinquent)
+Allen_School_Districts <- sf::st_read("School_Districts.shp")
 ```
 
 
-Which are land bank properties?
+Putting them together
+
 
 ```{r}
-Allen_Delinquents_With_Distance_Info <- Allen_Delinquents_With_Distance_Info %>% 
-  mutate(Gov_Foreclosure=if_else(PARCEL %in% Allen_County_LB_Properties$PARCEL, 1,0))
+Allen_Delinquents_with_schools <- st_join(Allen_School_Districts, Allen_County_Delinquent_Geo)
 ```
+ Looks like a few are in multiple school districts. 
+ 
+```{r}
+Allen_Dupllicate_Parcels <- Allen_Delinquents_with_schools %>% group_by(PARCEL_NO) %>% summarize(Total=n()) %>% filter(Total>1) %>% ungroup()
+
+datatable(Allen_Dupllicate_Parcels)
+```
+ 
+
+```{r}
+Desciphering_Allen_Codes <- Allen_Delinquents_with_schools %>% 
+  group_by(SCHOOL_DIS) %>% 
+  count(SCHOOL)
+
+datatable(Desciphering_Allen_Codes)
+```
+Looks like some districts have an open enrollment policy such as [Allen East](https://www.ae.k12.oh.us/docs/district/2021-22/interdistrict%20oe%20guidelines%2021.22.pdf?id=3326) and {Shawnee local School district in Lima, OH](https://www.limashawnee.com/page/new-students-open-enrollment)
+
+And it looks like most districts in general have open enrollment policies except for those that surround inner-city districts.[Yikes.](https://www.dispatch.com/restricted/?return=https%3A%2F%2Fwww.dispatch.com%2Fstory%2Fnews%2F2021%2F08%2F25%2Fwhat-ohio-schools-allow-open-enrollment-new-bill-works%2F8162389002%2F)
 
 
-How much do people owe as a percentage of what their place is worth? This ended up not working out because we don't know how much properties owed when they went into the land bank or when they were certified tax delinquent. 
-
+Because of this, we are not going to add school data. 
 
 
 
@@ -2182,19 +2360,22 @@ And now, the machine learning part.
 
 
 ```{r}
-stack_overflow <- as.data.frame(Allen_Delinquents_With_Distance_Info)
+stack_overflow <- Allen_data %>% 
+filter(Delinquency_Amount>0) %>% #Some properties given to the land bank
+filter(Years_Delinquent>0)
 
 
 stack_overflow <- stack_overflow %>% 
     mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
-    mutate_if(is.character, factor) %>% 
-   mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
+    mutate_if(is.character, factor) #%>% 
+   #mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
 
 
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
-  #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
-    select(MKTTOTVAL, Gov_Foreclosure)
+    select(Gov_Foreclosure, Delinquency_Amount)
+      #Delinquency_Amount, 
+           
 
 #stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
 
@@ -2333,4 +2514,722 @@ datatable(tidy(stack_glm))
 
 ```
 
+Comparing LB to non-LB parcels
 
+```{r}
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(median(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(mean(Delinquency_Amount))
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Delinquency_Amount))
+
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Delinquency_Amount))
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Years_Delinquent))
+
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Years_Delinquent))
+
+```
+
+
+```{r}
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(median(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(mean(Delinquency_Amount))
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Delinquency_Amount))
+
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Delinquency_Amount))
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Years_Delinquent))
+
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Years_Delinquent))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+###Montgomery County
+
+Okay, first bringing in the lists of delinquent taxpayers. 
+
+Lists of Delinquent taxpayers are available on the [Montgomery County Auditor's website.](http://www.mctreas.org/mctreas/filedownloads_auditor.cfm)
+
+Here are the codes for the [column names.](http://www.mctreas.org/mctreas/data/delq%20file%20layout.pdf)
+
+For whatever reason, they have 2014 delinquents, then it skips to 2018. 
+
+```{r}
+Montgomery_Delinquents_to_2014 <- rio::import("Montgomery Delinquent to 5-31-2014 Delq_20140531.csv")
+Montgomery_Delinquents_to_2018 <-  rio::import("Montgomery Delinquent to 8-31-2018 Delq_20180831.csv")
+Montgomery_Delinquents_to_2021  <- rio::import("Montgomery Delq_20211130.csv")
+```
+Putting those together
+
+```{r}
+Montgomery_Delinquent <- rbind(Montgomery_Delinquents_to_2014, Montgomery_Delinquents_to_2018, Montgomery_Delinquents_to_2021)
+
+```
+
+```{r}
+Montgomery_Delinquent <- Montgomery_Delinquent %>% 
+  rename(Record_Update_Date=`ASMTWEN  `)
+
+Montgomery_Delinquent$Record_Update_Date <- dmy(Montgomery_Delinquent$Record_Update_Date)
+```
+
+
+
+How much was owed each year?
+
+```{r}
+  ggplot(Montgomery_Delinquent, aes(x=year(Record_Update_Date), y=NETDELQ))+
+         geom_col()
+```
+
+
+Looking for duplicates
+
+```{r}
+datatable(Montgomery_Delinquent %>% group_by(`PARCELID      `) %>% count())
+```
+
+So here, some parcels stay delinquent the whole time. such as A01 00109 0022, which owed $3,590.42 in 2013, $7,043 in 2018, ad $10,218.30 by 2021.So before we look for the unique parcels, we want to order them by date reverse chronologically, to get the max amount owed. 
+
+Update: that was a terrible idea. Land bank properties which were delinquent in 2018 and then went to the land bank had their tax lien wiped. Which made it seem farther on like properties that owed less  were more likely to go to the land bank. So this just changed the name of the column. 
+
+So for our purposes, we're just going to see, of the properties behind on their taxes in 2018, how many eventually went to the land bank?
+
+```{r}
+Montgomery_Delinquent <- Montgomery_Delinquent %>% 
+  rename(`Parcel Number`=`PARCELID      `) %>% 
+  filter(year(Record_Update_Date)==2018)
+
+
+
+
+#%>% 
+ #arrange(desc(Record_Update_Date)) %>% 
+           #distinct(`Parcel Number`, .keep_all = TRUE)
+```
+
+Next, bringing in the map. Available at http://www.mcauditor.org/downloads/gis_downloads.cfm
+
+
+```{r}
+setwd("Montgomery SHAPEFILE_PARCELLINES_ROW_OLDLOT/")
+Montgomery_Geo <- sf::st_read("Parcels.shp")
+
+#head(Montgomery_Geo)
+
+```
+Setting map setting (because  Projected CRS is Ohio South which is messing us up)
+
+```{r}
+Montgomery_Geo <- st_transform(Montgomery_Geo, crs = st_crs(4326))
+
+st_crs(Montgomery_Geo)
+```
+
+
+
+Now bringing in the land bank properties.
+
+Note: As per the Land Bank, this is what each code stands for: 
+Program Name	Description
+	
+TFAP-	Tax Foreclosure Acquistion Program
+Land Banking-	Land Banking Program
+NIP- 	Neighborhood Initiative Program - Demo
+DIY-	Do It Yourself renovation program
+CRP-	Commercial Program
+Non-NIP Demo-	Demo - Non NIP
+TNI-	Thriving Neighborhood Program
+Partner Project- 	Special community Program
+
+```{r}
+Montgomery_LB_1 <- read_excel("Montgomery County Land Bank Property listing.xlsx", sheet =1) #This only brings in the first sheet
+Montgomery_LB_2 <- read_excel("Montgomery County Land Bank Property listing.xlsx", sheet =2) #This only brings in the second sheet
+
+Montgomery_LB_1 <- Montgomery_LB_1 %>% rename(Date_Recorded_Or_Disposed=`Deed Recorded Date`)
+Montgomery_LB_2 <- Montgomery_LB_2 %>% rename(Date_Recorded_Or_Disposed=`Date Disposed`)
+
+
+
+Montgomery_LB_2 <- Montgomery_LB_2 %>% rename(program=Program)
+
+Montgomery_LB <- rbind(Montgomery_LB_1, Montgomery_LB_2)
+
+head(Montgomery_LB)
+```
+
+When were these properties acquired or disposed?
+
+```{r}
+ggplot(Montgomery_LB, aes(x=year(Date_Recorded_Or_Disposed), fill=Status))+
+         geom_bar()
+```
+
+
+
+
+
+
+Let's take a look at where all those properties are. 
+
+```{r}
+Montgomery_LB_Geo <- Montgomery_Geo %>% 
+  filter(TAXPINNO %in%  Montgomery_LB$`Parcel Number`)
+
+```
+Note: 44 properties or 2.8% missing
+
+
+
+
+```{r}
+Montgomery_Properties_plotted <- leaflet(data = Montgomery_LB_Geo) %>% 
+  addTiles() %>% 
+  setView(-84.19014950126065,39.75795086894034, zoom = 10) %>% #Set to Dayton Center
+  addPolygons()
+  
+Montgomery_Properties_plotted
+```
+
+
+ Which of those delinquent 2018 properties eventually went to the land bank? 
+
+
+```{r}
+Montgomery_data <- Montgomery_Delinquent  %>% 
+  mutate(Gov_Foreclosure=if_else(`Parcel Number` %in% Montgomery_LB$`Parcel Number`, 1,0))
+```
+
+
+How many and what percent went to the Land Bank?
+
+```{r}
+sum(Montgomery_data$Gov_Foreclosure)
+
+nrow(Montgomery_data)
+
+sum(Montgomery_data$Gov_Foreclosure)/(nrow(Montgomery_data))
+
+```
+
+
+Note: The land bank has 1,548 parcels and the number of certified tax delinquent properties was only 1401. 
+
+```{r}
+Montgomery_LB_Not_Delinquent <- filter(Montgomery_LB, !(`Parcel Number` %in%  Montgomery_Delinquent$`Parcel Number`))
+```
+
+It looks like these properties fell behind on taxes and went to the land bank in between. For example, parcel R72 12202 0030 which got behind on taxes at th end of 2014, then was behind through 2016, then went to the land bank on April 7, 2017, which wiped the tax lien. 
+
+So it's important to note that we are working with a subset here: of the properties delinquent in 2014 and 2018, and 2021, about 2% were actually foreclosed upon. 
+
+
+###Bringing in the school district
+
+```{r}
+Montgomery_data$School_District <- Montgomery_Geo$V_SCHOOL[match(Montgomery_data$`Parcel Number`, Montgomery_Geo$TAXPINNO)]
+  
+```
+
+
+
+A few things about this data: 
+*They write "<10" for small categories less than 10, instead of an actual number. 
+*Unlike on the website, this has decimals. How do you have part of a kid? Clarification from the Ohio Dept of education's Mandy Minick: "we count students as full time equivalents (FTEs) based on the length of time they are enrolled.  A student enrolled all year counts as 1.0 FTE in the total.  A student enrolled for half a year is 0.5 FTEs and so on.  We sum all the FTEs across the entire year (hence, the decimals). The spreadsheet on the left shows the decimals (33.188847), while the one on the right is rounded to the closest whole number for ease of reading."
+
+Note: some properties ended up being in Montgomery County but in some Greene County School districts. 
+
+```{r}
+
+#Montgomery_schools_demographic <- read_xlsx("Montgomery_School_Districts/2021 school districts Montgomery county.xlsx", skip=2)
+
+Montgomery_schools_demographic <- read_xlsx("All School districts Demographic info.xlsx", skip = 2) 
+
+Montgomery_schools_demographic  <- Montgomery_schools_demographic %>% 
+  filter(str_detect(District, "Montgomery")|str_detect(District,"Fairborn")|str_detect(District,"Beavercreek")|str_detect(District,"Springboro")|str_detect(District,"Carlisle")|str_detect(District,"Preble Shawnee"))
+
+
+head(Montgomery_schools_demographic)
+```
+
+
+How many kids are in each district?
+
+We are going to have to _estimate_ here, because if there's less than 10, they don't report the number.
+
+```{r}
+Montgomery_schools_demographic_no_remainders <- Montgomery_schools_demographic %>% 
+  filter(CountOfEnrolledStudents!="<10")
+
+  
+Montgomery_schools_demographic_no_remainders$CountOfEnrolledStudents <- as.double(Montgomery_schools_demographic_no_remainders$CountOfEnrolledStudents)
+
+Montgomery_school_pop <- Montgomery_schools_demographic_no_remainders%>% 
+  group_by(District) %>% 
+    summarize(Total=sum(CountOfEnrolledStudents))
+
+datatable(Montgomery_school_pop)
+```
+
+Here we are going to treat race and socioeconomic status as factors, even though we have numbers. Why? 
+
+These variables are going to affect our data in a categorical way. You either are discriminating on race or class or you are not. The amount of discrimination does not depend on the amount of people. For example, in the [Kaggle Titantic competition](https://www.kaggle.com/c/titanic) (which is great way to learn machine learning!) The passengers' ticket price is listed. Which passengers were more likely to survive?
+
+You are more likely to survive _if you have a first class ticket_. Period. If your first class ticket costs twice as much as the next first class ticket, that didn't make you twice as likely to survive as someone with a ticket half that price. 
+
+Which school districts have large minority populations? Which have populations with a high number of kids in poverty? 
+
+
+Finding percentage of minority by District: 
+```{r}
+Montgomery_schools_by_race <- Montgomery_schools_demographic_no_remainders %>% 
+  group_by(District,`Race/Ethnicty`,) %>% #typo in original for 'ethnicity'
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Montgomery_schools_by_race)
+```
+
+```{r}
+Montgomery_schools_by_race %>% 
+  filter(`Race/Ethnicty`=="White, Non-Hispanic") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+
+
+Finding percent disadvantaged by district: 
+ 
+```{r}
+Montgomery_schools_by_poverty <- Montgomery_schools_demographic_no_remainders %>% 
+  group_by(District,Subgroup,) %>% 
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Montgomery_schools_by_poverty)
+```
+
+```{r}
+Montgomery_schools_by_poverty %>% 
+  filter(Subgroup=="Economic Disadvantaged") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+And categorizing them: 
+
+```{r}
+Montgomery_schools_by_race_with_majority_white <- Montgomery_schools_by_race %>% 
+  group_by(District) %>% 
+summarize(Majority_White=if_else(`Race/Ethnicty`=="White, Non-Hispanic"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_White_District=if_else(sum(Majority_White)==1,1,0))
+  
+
+Montgomery_schools_with_majority_disadvantaged <- Montgomery_schools_by_poverty %>% 
+  group_by(District) %>% 
+summarize(Majority_Disadvantaged=if_else(Subgroup=="Economic Disadvantaged"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_Disadvantaged_District=if_else(sum(Majority_Disadvantaged)==1,1,0))
+
+  
+```
+
+How are the school districts represented in our delinquent dataset?
+
+```{r}
+Montgomery_Delinquents_by_School_District <- Montgomery_data %>% group_by(`School_District`) %>% summarize(Total=n())
+datatable(Montgomery_Delinquents_by_School_District)
+
+```
+
+
+
+The names of school districts is the same but listed a bit differently in both data sets, so we have to do a bit of manual matching here. 
+
+```{r}
+Montgomery_data <- Montgomery_data %>% 
+  mutate(School_Dest_Standardized= case_when(
+     School_District=="DAY" ~ "Dayton City - 043844 (Montgomery)" , 
+      School_District== "HUB"  ~  "Huber Heights City - 048751 (Montgomery)",
+     School_District=="NLB" ~ "New Lebanon Local School District - 048710 (Montgomery)"  ,
+     School_District=="TM" ~  "Trotwood-Madison City - 048694 (Montgomery)"  ,
+     School_District=="WCR" ~   "West Carrollton City - 045054 (Montgomery)",
+     School_District=="KT"   ~  "Kettering City School District - 044180 (Montgomery)",
+     School_District=="CV"    ~ "Centerville City - 043737 (Montgomery)",
+     School_District=="MDR"    ~ "Mad River Local - 048702 (Montgomery)",
+    School_District== "VB"     ~ "Vandalia-Butler City - 044958 (Montgomery)",
+     School_District=="JEFTWP" ~ "Jefferson Township Local - 048686 (Montgomery)",
+     School_District=="VV"     ~ "Valley View Local - 048744 (Montgomery)",
+     School_District=="NMT"    ~ "Northmont City - 048728 (Montgomery)",
+     School_District=="MBG"    ~ "Miamisburg City - 044396 (Montgomery)" ,
+     School_District=="NRG"    ~ "Northridge Local - 048736 (Montgomery)",
+     School_District=="OAK"    ~ "Oakwood City - 044586 (Montgomery)", 
+     School_District=="BRK"    ~ "Brookville Local - 048678 (Montgomery)",
+    School_District== "NA"   ~ "NA",    
+     School_District=="TCN"    ~ "Trotwood-Madison City - 048694 (Montgomery)", 
+     School_District=="FBN"    ~ "Fairborn City - 043968 (Greene)" ,#Some are in Montgomery county BUT in Greene County School districts
+    School_District== "BVR"~    "Beavercreek City - 047241 (Greene)",
+     School_District=="SPBG"~ "Springboro Community City - 050427 (Warren)",
+     School_District=="CAR"  ~  "Carlisle Local - 050419 (Warren)",
+     School_District=="PS"    ~ "Preble Shawnee Local - 049288 (Preble)",
+     School_District=="X" ~ "NA"))
+
+
+```
+
+And here we incorporate race and socioeconomic status as factors. 
+
+```{r}
+Montgomery_data$is_school_district_majority_white <- Montgomery_schools_by_race_with_majority_white$Majority_White_District[match(Montgomery_data$School_Dest_Standardized,Montgomery_schools_by_race_with_majority_white$District)]
+
+Montgomery_data$is_school_district_majority_disadvantaged <- Montgomery_schools_with_majority_disadvantaged$Majority_Disadvantaged_District[match(Montgomery_data$School_Dest_Standardized,Montgomery_schools_with_majority_disadvantaged$District)]
+
+
+```
+
+Adding in locations
+
+```{r}
+Montgomery_data$geometry <- Montgomery_Geo$geometry[match(Montgomery_data$`Parcel Number`,Montgomery_Geo$TAXPINNO)]
+```
+
+
+Next, we want to see if the location near valuable property is a factor. 
+
+
+Where are the high-value properties?
+
+```{r}
+Montgomery_Values <- foreign::read.dbf("cama.dbf")
+
+#The actual value column has commas in it which really messes things up
+Montgomery_Values$APPRTOTAL <- 
+rmiscutils ::number_with_commas(Montgomery_Values$APPRTOTAL)
+
+Montgomery_Values$APPRTOTAL <- as.double(Montgomery_Values$APPRTOTAL)
+
+Montgomery_Values_Millions <- filter(Montgomery_Values, APPRTOTAL>10000000)
+
+Montgomery_Geo_Millions <- Montgomery_Geo %>% 
+  filter(TAXPINNO  %in% Montgomery_Values_Millions$PARID)
+```
+
+
+How close are they to our properties?
+
+```{r }
+library(lwgeom)
+
+sf::sf_use_s2(FALSE)
+
+Montgomery_Distance_Matrix <- as.data.frame(st_distance(  Montgomery_Geo_Millions$geometry, Montgomery_data$geometry,)) #This takes quite a while just FYI
+
+
+
+  #Sets column names
+  
+Montgomery_Distance_Matrix1 <- Montgomery_Distance_Matrix %>% 
+  `colnames<-`(Montgomery_data$`Parcel Number` ) %>% 
+  
+  #Adds a column containing names so that each row now also has a name
+  cbind(name = Montgomery_Geo_Millions$TAXPINNO  ) 
+#Cuyahoga_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Cuyahoga Distance Matrix as well.
+
+```
+
+
+
+Removing the units 
+
+```{r}
+library(units)
+Montgomery_Distance_Matrix_No_Units <- drop_units(Montgomery_Distance_Matrix1)
+```
+
+
+Finding the number of high-value parcels within half a mile of the delinquent properties. 
+
+```{r}
+Montgomery_Number_Near <- Montgomery_Distance_Matrix_No_Units %>%                                                                                  
+  dplyr::summarise_all(~sum(.<2640, na.rm = TRUE))
+```
+
+And for comparison, also the number twice as far. 
+
+```{r}
+Montgomery_Number_Semi_Near <- Montgomery_Distance_Matrix_No_Units %>%                                                                           
+  dplyr::summarise_all(~sum(.<5280, na.rm = TRUE))
+```
+
+```{r}
+Montgomery_Distance_Info1 <-Montgomery_Number_Near %>% 
+  select(-name) %>% 
+  pivot_longer("A01 00101 0061":"H33300816 0011", names_to = "Parcel Number", values_to = "number_of_high_value_properties_within_half_mile" )
+```
+
+```{r}
+Montgomery_Distance_Info2 <-Montgomery_Number_Semi_Near %>% 
+  select(-name) %>% 
+  pivot_longer("A01 00101 0061":"H33300816 0011", names_to = "Parcel Number", values_to = "number_of_high_value_properties_within_mile" )
+```
+
+
+Adding them together
+
+```{r}
+Montgomery_data <- left_join(Montgomery_data, Montgomery_Distance_Info1, by="Parcel Number")
+Montgomery_data <- left_join(Montgomery_data, Montgomery_Distance_Info2, by="Parcel Number")
+```
+
+Which properties were just near expensive properties, period?
+```{r}
+Montgomery_data  <- Montgomery_data %>% 
+  mutate(Within_half_mile=if_else(number_of_high_value_properties_within_half_mile>=1,1,0)) %>% 
+ mutate(Within_mile=if_else(number_of_high_value_properties_within_mile>=1,1,0))          
+```
+
+
+
+To ask the auditor: Why do 573 of these 34,626 properties have a net delinquency of zero? (Two of which go to the Land bank?)
+```{r}
+Montgomery_data <- Montgomery_data %>% 
+  filter(NETDELQ>0)
+```
+
+Also 329 have a property value of 0, which doesn't make sense. Will ask that as well.
+```{r}
+Montgomery_data <- Montgomery_data %>% 
+  filter(ASMTTOTAL>0)
+```
+
+Converting percent owed
+```{r}
+Montgomery_data <- Montgomery_data %>% 
+  mutate(owed_as_a_percentage_of_lot_value=NETDELQ/ASMTTOTAL)
+```
+
+And now for the machine learning part
+
+
+
+```{r}
+stack_overflow <- as.data.frame(Montgomery_data)
+
+
+stack_overflow <- stack_overflow %>% 
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor) #%>% 
+   #mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+    select("Gov_Foreclosure",
+           NETDELQ,
+      #owed_as_a_percentage_of_lot_value,                                                        
+      #"is_school_district_majority_white",
+          #"is_school_district_majority_disadvantaged",
+           #"number_of_high_value_properties_within_half_mile", #not stastically significant 
+      "number_of_high_value_properties_within_mile",   
+           #"Within_half_mile",   
+           #"Within_mile"       
+    )
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
+
+Montgomery parcels
+
+```{r}
+Montgomery_data %>% filter(Gov_Foreclosure==1) %>% nrow()
+
+Montgomery_data %>% arrange(desc(owed_as_a_percentage_of_lot_value)) %>% top_n(278) %>% summarize(sum(Gov_Foreclosure))
+
+Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% summarize(sum(Gov_Foreclosure))
+
+```
+
+How much did land bank parcels owe?
+
+```{r}
+Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(NETDELQ))
+Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(NETDELQ))
+
+Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% summarize(mean(NETDELQ))
+Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% summarize(median(NETDELQ))
+```
+
+How many were still delinquent three years later?
+```{r}
+Montgomery_Worst_Offenders <- Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% filter(`Parcel Number` %in% Montgomery_Delinquents_to_2021$`PARCELID      `) 
+
+datatable(Montgomery_Worst_Offenders)
+```

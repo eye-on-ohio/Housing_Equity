@@ -1,0 +1,2083 @@
+---
+title: "Land Bank AI"
+author: "Lucia Walinchus"
+date: "Summer 2021"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(DT)
+library(ggmap)
+library(XML)
+library(purrr)
+library(leaflet)
+library(sf)
+library(readxl)
+library(tidymodels)
+library(themis)
+
+```
+
+
+### Franklin County
+
+First, figuring out which properties are land bank properties. 
+
+Lists of Property transfers are available on the [Franklin County Auditor's website.](https://franklincountyauditor.com/ftp)
+
+Here are the codes for the [column names.](https://franklincountyauditor.com/AUDR-website/media/Documents/FTP/Parcel-CSV-description-of-fields.pdf)
+
+As there's no clear way to tell which are land bank properties, (properties in the land bank are simply titled "City of Columbus") we got this from a FOIA. 
+
+
+```{r} 
+Franklin2018 <- rio::import("Franklin Transfers/Franklin 2018 Transfer.xlsx")
+#so this is a terrible way of doing things, but this took up a ton of memory so this is the only way to do it. 
+
+Franklin2018 <- Franklin2018 %>% 
+  filter(str_detect(OwnerName1, "Reutilization|FORF|COMMUNITY IMPROVEMENT|Community Improvement|CITY OF COLUMBUS"))
+
+Franklin2019 <- read_csv("Franklin Transfers/Franklin 2019 Transfer.csv")
+
+Franklin2019 <- Franklin2019 %>% 
+  filter(str_detect(OwnerName1, "Reutilization|FORF|COMMUNITY IMPROVEMENT|Community Improvement|CITY OF COLUMBUS"))
+
+Franklin2020 <- rio::import("Franklin Transfers/Franklin Jan 2020 Transfer.csv")
+
+Franklin2020 <- Franklin2020 %>% 
+  filter(str_detect(OwnerName1, "Reutilization|FORF|COMMUNITY IMPROVEMENT|Community Improvement|CITY OF COLUMBUS"))
+
+Franklin2021 <- rio::import("Franklin Transfers/2021 Franklin Transfers.csv")
+
+Franklin2021 <- Franklin2021 %>% 
+  filter(str_detect(OwnerName1, "Reutilization|FORF|COMMUNITY IMPROVEMENT|Community Improvement|CITY OF COLUMBUS"))
+
+
+Franklin_Transfers_To_Col <- rbind(Franklin2018, Franklin2019, Franklin2020, Franklin2021)
+
+Franklin_Transfers_To_Col <- Franklin_Transfers_To_Col %>% 
+  distinct(TaxId, .keep_all = TRUE)
+
+rm(Franklin2018, Franklin2019, Franklin2020, Franklin2021)
+
+Franklin_Transfers_To_Col <- as.Date(Franklin_LB$Transfers_To_Col)
+
+#Got this through a FOIA
+
+Franklin_LB <- rio::import("Franklin updated COCIC City Land Bank list 12.2021 corrections.xlsx")
+
+```
+
+
+
+
+
+
+How often do parcels get foreclosed or go to the Land bank?
+
+```{r}
+ggplot(Franklin_LB, aes(x=`Property Class`, fill=`Actual Disposition`))+
+  geom_bar()+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1.2, hjust = 1.1))
+```
+
+
+```{r}
+ggplot(Franklin_LB, aes(x=`Acquisition Method`, fill=`Property Class`))+
+  geom_bar()+
+  theme(axis.text.x = element_text(angle = 45, vjust = .9, hjust = .9))
+```
+
+When did they get acquired?
+
+```{r}
+
+```
+
+
+And now finding delinquents. Available from Franklin County's [website.](https://franklincountyauditor.com/ftp)
+
+```{r}
+Franklin_Delinquent2018 <- rio::import("Franklin 2018 TaxDetail.xlsx")
+Franklin_Delinquent2019 <- rio::import("Franklin 2019 TaxDetail.csv")
+Franklin_Delinquent2020<- rio::import("Franklin 2020 TaxDetail.csv")
+Franklin_Delinquent2021 <- rio::import("Franklin 2021 Tax detail.csv")
+
+Franklin_Delinquent2018$Year <- "2018"
+Franklin_Delinquent2019$Year <- "2019"
+Franklin_Delinquent2020$Year <- "2020"
+Franklin_Delinquent2021$Year <- "2021"
+
+Franklin_Delinquent <- rbind(Franklin_Delinquent2018, Franklin_Delinquent2019, Franklin_Delinquent2020, Franklin_Delinquent2021)
+
+rm(Franklin_Delinquent2018, Franklin_Delinquent2019, Franklin_Delinquent2020, Franklin_Delinquent2021)
+#mucho memory
+
+Franklin_Delinquent$AnnualPrior <- as.double(Franklin_Delinquent$AnnualPrior)
+
+Franklin_Delinquent <- Franklin_Delinquent %>% 
+  mutate(Amount_Owed=AnnualPrior) %>% #Delinquent tax from the previous year
+  filter(Amount_Owed>0)
+```
+
+
+How much was owed each year?
+
+```{r}
+  ggplot(Franklin_Delinquent, aes(x=Year, y=Amount_Owed))+
+         geom_col()
+```
+Some parcels are delinquent for all four of those years, so we are going to get rid of duplicates. 
+
+```{r}
+Franklin_Delinquent <- Franklin_Delinquent %>% 
+  arrange(desc(Amount_Owed)) %>% 
+            distinct(TaxId, .keep_all = TRUE)
+```
+
+
+So for our purposes, we're just going to see, of the properties behind on their taxes in 2018-2020, how many eventually went to the land bank?
+
+
+Next, bringing in the map. Available through the Franklin County FTP site: https://franklincountyauditor.com/ftp
+
+```{r}
+setwd("Franklin Parcel Polygons 2017 20171229_Parcel_Polygons/")
+Franklin_Geo <- sf::st_read("TAXPARCEL_CONDOUNITSTACK_LGIM.shp")
+
+head(Franklin_Geo)
+
+```
+
+
+```{r}
+Franklin_LB <- Franklin_LB %>% 
+  mutate(PARCELID=str_replace_all(`Parcel Number`,"-",""))
+```
+
+
+Let's take a look at where all those properties are. 
+
+```{r}
+Franklin_LB_Geo <- Franklin_Geo %>% 
+  filter(PARCELID %in%  Franklin_LB$`Parcel Number`)
+
+```
+
+
+And plotting them
+```{r}
+Franklin_LB_Geo <- st_as_sf(Franklin_LB_Geo)
+
+plot(Franklin_LB_Geo %>% select(PARCELID, geometry))
+```
+
+
+
+
+```{r}
+
+Franklin_LB_Geo <- st_transform(Franklin_LB_Geo, crs = 4326)
+
+Franklin_LB_Geo <- st_zm(Franklin_LB_Geo, drop = T, what="ZM")
+
+Franklin_Properties_plotted <- leaflet(data = Franklin_LB_Geo) %>% 
+  addTiles() %>% 
+  setView(-83.00104876838368,39.962226618264744, zoom = 10) %>% #Set to Columbus Center
+  addPolygons(popup = paste("Parcel Number:",Franklin_LB_Geo$PARCELID))
+  
+Franklin_Properties_plotted
+```
+
+We also want to make sure these are properties that went to the land bank AFTER they became delinquent in our dataset. A few properties go to the land bank THEN they become delinquent by just a bit and that messes up our data set. 
+```{r}
+Franklin_LB$`Acquisition Date` <- as.Date(Franklin_LB$`Acquisition Date`)
+
+Franklin_LB_Later <- filter(Franklin_LB, `Acquisition Date`>"2017-12-31")
+  
+```
+
+ Which of those delinquent  properties eventually went to the land bank? 
+
+
+```{r}
+Franklin_data <- Franklin_Delinquent  %>% 
+  mutate(`Property Number`=substr(TaxId,1,10)) %>% 
+  mutate(Gov_Foreclosure=if_else(`Property Number` %in% Franklin_LB_Later$`Parcel Number`,1,0))
+```
+
+
+
+
+
+How many and what percent went to the Land Bank?
+
+```{r}
+sum(Franklin_data$Gov_Foreclosure)
+
+nrow(Franklin_data)
+
+sum(Franklin_data$Gov_Foreclosure)/(nrow(Franklin_data))
+
+```
+
+
+
+
+###Bringing in the school district
+
+```{r}
+Franklin_data$PARCELID <- substr(Franklin_data$TaxId,1,10)
+
+Franklin_data$School_District <- Franklin_Geo$SCHLDSCRP[match(Franklin_data$PARCELID, Franklin_Geo$PARCELID)]
+  
+```
+
+Note: in Franklin County, your school district generally depends on where your master bedroom is if your property is in more than one school district. Some places like Canal Winchester have open enrollment, for example Dublin City schools do not. 
+
+A few things about this data: 
+*They write "<10" for small categories less than 10, instead of an actual number. 
+*Unlike on the website, this has decimals. How do you have part of a kid? Clarification from the Ohio Dept of education's Mandy Minick: "we count students as full time equivalents (FTEs) based on the length of time they are enrolled.  A student enrolled all year counts as 1.0 FTE in the total.  A student enrolled for half a year is 0.5 FTEs and so on.  We sum all the FTEs across the entire year (hence, the decimals). The spreadsheet on the left shows the decimals (33.188847), while the one on the right is rounded to the closest whole number for ease of reading."
+
+N
+
+```{r}
+
+Franklin_schools_demographic <- read_xlsx("All School districts Demographic info.xlsx", skip = 2) 
+
+Franklin_schools_demographic  <- Franklin_schools_demographic %>% 
+  filter(str_detect(District, "Franklin|Olentangy|Licking Heights|Teays Valley|Pickerington|Madison-Plains|Jonathan Alder")) #some are in Franklin county but in a different school district. Franklin county schools do not have open enrollment; it generally depends on where your master bedroom is if your property is in two school districts. 
+
+
+head(Franklin_schools_demographic)
+```
+
+
+How many kids are in each district?
+
+We are going to have to _estimate_ here, because if there's less than 10, they don't report the number.
+
+```{r}
+Franklin_schools_demographic_no_remainders <- Franklin_schools_demographic %>% 
+  filter(CountOfEnrolledStudents!="<10")
+
+  
+Franklin_schools_demographic_no_remainders$CountOfEnrolledStudents <- as.double(Franklin_schools_demographic_no_remainders$CountOfEnrolledStudents)
+
+Franklin_school_pop <- Franklin_schools_demographic_no_remainders%>% 
+  group_by(District) %>% 
+    summarize(Total=sum(CountOfEnrolledStudents))
+
+datatable(Franklin_school_pop)
+```
+
+Here we are going to treat race and socioeconomic status as factors, even though we have numbers. Why? 
+
+These variables are going to affect our data in a categorical way. You either are discriminating on race or class or you are not. The amount of discrimination does not depend on the amount of people. For example, in the [Kaggle Titantic competition](https://www.kaggle.com/c/titanic) (which is great way to learn machine learning!) The passengers' ticket price is listed. Which passengers were more likely to survive?
+
+You are more likely to survive _if you have a first class ticket_. Period. If your first class ticket costs twice as much as the next first class ticket, that didn't make you twice as likely to survive as someone with a ticket half that price. 
+
+Which school districts have large minority populations? Which have populations with a high number of kids in poverty? 
+
+
+Finding percentage of minority by District: 
+```{r}
+Franklin_schools_by_race <- Franklin_schools_demographic_no_remainders %>% 
+  group_by(District,`Race/Ethnicty`,) %>% #typo in original for 'ethnicity'
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Franklin_schools_by_race)
+```
+
+```{r}
+Franklin_schools_by_race %>% 
+  filter(`Race/Ethnicty`=="White, Non-Hispanic") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+
+
+Finding percent disadvantaged by district: 
+ 
+```{r}
+Franklin_schools_by_poverty <- Franklin_schools_demographic_no_remainders %>% 
+  group_by(District,Subgroup,) %>% 
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Franklin_schools_by_poverty)
+```
+
+```{r}
+Franklin_schools_by_poverty %>% 
+  filter(Subgroup=="Economic Disadvantaged") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+And categorizing them: 
+
+```{r}
+Franklin_schools_by_race_with_majority_white <- Franklin_schools_by_race %>% 
+  group_by(District) %>% 
+summarize(Majority_White=if_else(`Race/Ethnicty`=="White, Non-Hispanic"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_White_District=if_else(sum(Majority_White)==1,1,0))
+  
+
+Franklin_schools_with_majority_disadvantaged <- Franklin_schools_by_poverty %>% 
+  group_by(District) %>% 
+summarize(Majority_Disadvantaged=if_else(Subgroup=="Economic Disadvantaged"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_Disadvantaged_District=if_else(sum(Majority_Disadvantaged)==1,1,0))
+
+  
+```
+
+How are the school districts represented in our delinquent dataset?
+
+```{r}
+Franklin_Delinquents_by_School_District <- Franklin_data %>% group_by(`School_District`) %>% summarize(Total=n())
+datatable(Franklin_Delinquents_by_School_District)
+
+```
+
+
+
+The names of school districts is the same but listed a bit differently in both data sets, so we have to do a bit of manual matching here. 
+
+```{r}
+Franklin_data <- Franklin_data %>% 
+  mutate(School_Dest_Standardized= case_when(
+     School_District== "COLUMBUS CSD" ~ "Columbus City School District - 043802 (Franklin)" , 
+      School_District== "NA" ~ "NA",
+     School_District=="BEXLEY CSD"~ "Bexley City - 043620 (Franklin)",
+     School_District=="GAHANNA JEFFERSON CSD"~ "Gahanna-Jefferson City - 046961 (Franklin)",
+     School_District=="GRANDVIEW HEIGHTS CSD" ~ "Grandview Heights Schools - 044073 (Franklin)",
+     School_District=="SOUTH WESTERN CSD"~  "South-Western City - 044800 (Franklin)",
+     School_District=="HILLIARD CSD" ~ "Hilliard City - 047019 (Franklin)", 
+     School_District=="DUBLIN CSD" ~"Dublin City - 047027 (Franklin)",
+    School_District== "REYNOLDSBURG CSD" ~ "Reynoldsburg City - 047001 (Franklin)",
+     School_District=="LICKING HEIGHTS LSD"~"Licking Heights Local - 048009 (Licking)",
+     School_District=="UPPER ARLINGTON CSD" ~ "Upper Arlington City - 044933 (Franklin)",
+     School_District=="WESTERVILLE CSD"~ "Westerville City - 045047 (Franklin)" , 
+     School_District=="WHITEHALL CSD"~ "Whitehall City - 045070 (Franklin)" ,
+     School_District=="WORTHINGTON CSD"~"Worthington City - 045138 (Franklin)"  ,      
+     School_District=="NEW ALBANY-PLAIN LSD"~"New Albany-Plain Local - 046995 (Franklin)" , 
+     School_District=="HAMILTON LSD"~"Hamilton Local - 046953 (Franklin)",
+    School_District== "GROVEPORT-MADISON LSD"~"Groveport Madison Local - 046979 (Franklin)",
+     School_District=="CANAL WINCHESTER LSD" ~ "Canal Winchester Local - 046946 (Franklin)"  ,
+     School_District=="TEAYS VALLEY LSD"~"Teays Valley Local - 049098 (Pickaway)",     
+    School_District== "PICKERINGTON LSD"~ "Pickerington Local - 046896 (Fairfield)",
+     School_District=="MADISON PLAINS LSD" ~ "Madison-Plains Local - 048272 (Madison)",
+     School_District=="JONATHAN ALDER LSD"~ "Jonathan Alder Local - 048264 (Madison)" ,
+     School_District=="OLENTANGY LSD"~ "Olentangy Local - 046763 (Delaware)"
+     ))
+
+
+```
+
+And here we incorporate race and socioeconomic status as factors. 
+
+```{r}
+Franklin_data$is_school_district_majority_white <- Franklin_schools_by_race_with_majority_white$Majority_White_District[match(Franklin_data$School_Dest_Standardized,Franklin_schools_by_race_with_majority_white$District)]
+
+Franklin_data$is_school_district_majority_disadvantaged <- Franklin_schools_with_majority_disadvantaged$Majority_Disadvantaged_District[match(Franklin_data$School_Dest_Standardized,Franklin_schools_with_majority_disadvantaged$District)]
+
+
+```
+
+Adding in locations
+
+```{r}
+Franklin_data$geometry <- Franklin_Geo$geometry[match(Franklin_data$`Property Number`,Franklin_Geo$PARCELID)]
+```
+
+
+Next, we want to see if the location near valuable property is a factor. 
+
+
+Where are the high-value properties?
+
+```{r}
+
+Franklin_Geo_Millions <- filter(Franklin_Geo, TOTVALUEBA>10000000)
+
+```
+
+
+How close are they to our properties?
+
+```{r }
+library(lwgeom)
+
+sf::sf_use_s2(FALSE)
+
+Franklin_Distance_Matrix <- as.data.frame(st_distance(  Franklin_Geo_Millions$geometry, Franklin_data$geometry,)) #This takes quite a while just FYI
+
+
+
+  #Sets column names
+  
+Franklin_Distance_Matrix1 <- Franklin_Distance_Matrix %>% 
+  `colnames<-`(Franklin_data$TaxId ) %>% 
+  
+  #Adds a column containing names so that each row now also has a name
+  cbind(name = Franklin_Geo_Millions$PARCELID  ) 
+#Franklin_Distance_Matrix1 is the same as Franklin_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Cuyahoga Distance Matrix as well.
+
+```
+
+
+
+Removing the units 
+
+```{r}
+library(units)
+Franklin_Distance_Matrix_No_Units <- drop_units(Franklin_Distance_Matrix1)
+```
+
+
+Finding the number of high-value parcels within half a mile of the delinquent properties. 
+
+```{r}
+Franklin_Number_Near <- Franklin_Distance_Matrix_No_Units %>%                                                                                  
+  dplyr::summarise_all(~sum(.<2640, na.rm = TRUE))
+```
+
+And for comparison, also the number twice as far. 
+
+```{r}
+Franklin_Number_Semi_Near <- Franklin_Distance_Matrix_No_Units %>%                                                                           
+  dplyr::summarise_all(~sum(.<5280, na.rm = TRUE))
+```
+
+```{r}
+Franklin_Distance_Info1 <-Franklin_Number_Near %>% 
+  select(-name) %>% 
+  pivot_longer("010-123442-00":"610-202590-00", names_to = "TaxId", values_to = "number_of_high_value_properties_within_half_mile" )
+```
+
+```{r}
+Franklin_Distance_Info2 <-Franklin_Number_Semi_Near %>% 
+  select(-name) %>% 
+  pivot_longer("010-123442-00":"610-202590-00", names_to = "TaxId", values_to = "number_of_high_value_properties_within_mile" )
+```
+
+
+Adding them together
+
+```{r}
+Franklin_data <- left_join(Franklin_data, Franklin_Distance_Info1, by="TaxId")
+Franklin_data <- left_join(Franklin_data, Franklin_Distance_Info2, by="TaxId")
+```
+
+Which properties were just near expensive properties, period?
+```{r}
+Franklin_data  <- Franklin_data %>% 
+  mutate(Within_half_mile=if_else(number_of_high_value_properties_within_half_mile>=1,1,0)) %>% 
+ mutate(Within_mile=if_else(number_of_high_value_properties_within_mile>=1,1,0))          
+```
+
+
+Adding in the lot value
+
+```{r}
+Franklin_data$Property_Value <- Franklin_Geo$TOTVALUEBA[match(Franklin_data$`Property Number`, Franklin_Geo$PARCELID)]
+                                                          
+```
+Note: this is the 2021 property value. And taxes went up with the 2021 evaluation so this is approximate. 
+
+
+
+
+
+Note: some properties are listed with a value of 0. 
+```{r}
+Franklin_data <- Franklin_data %>% 
+  filter(Property_Value>0)
+```
+
+Converting percent owed
+```{r}
+Franklin_data <- Franklin_data %>% 
+  mutate(owed_as_a_percentage_of_lot_value=Amount_Owed/Property_Value)
+```
+
+And now for the machine learning part
+
+
+
+```{r}
+stack_overflow <- as.data.frame(Franklin_data)
+
+
+stack_overflow <- stack_overflow %>% 
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor) #%>% 
+   #mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+    select(Gov_Foreclosure,
+      #Amount_Owed, 
+      owed_as_a_percentage_of_lot_value,                                                        
+      #"is_school_district_majority_white",
+          #"is_school_district_majority_disadvantaged",
+           #"number_of_high_value_properties_within_half_mile",
+      #"number_of_high_value_properties_within_mile",   
+           #"Within_half_mile",   
+           "Within_mile"       
+    )
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
+
+Exploring the data
+```{r}
+Franklin_data %>% count(Gov_Foreclosure)
+
+Franklin_data %>% summarize(mean(Amount_Owed))
+Franklin_data %>% summarize(median(Amount_Owed))
+
+Franklin_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Amount_Owed))
+Franklin_data %>% filter(Gov_Foreclosure==1) %>%summarize(median(Amount_Owed))
+
+Franklin_data %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Amount_Owed))
+Franklin_data %>% filter(Gov_Foreclosure==0) %>%summarize(median(Amount_Owed))
+```
+Looked at owed as a percentage of lot value
+
+```{r}
+Franklin_data %>% summarize(mean(owed_as_a_percentage_of_lot_value))
+Franklin_data %>% summarize(median(owed_as_a_percentage_of_lot_value))
+
+Franklin_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_a_percentage_of_lot_value))
+Franklin_data %>% filter(Gov_Foreclosure==1) %>%summarize(median(owed_as_a_percentage_of_lot_value))
+
+Franklin_data %>% filter(Gov_Foreclosure==0) %>% summarize(mean(owed_as_a_percentage_of_lot_value))
+Franklin_data %>% filter(Gov_Foreclosure==0) %>%summarize(median(owed_as_a_percentage_of_lot_value))
+```
+
+```{r}
+Franklin_data %>% filter(is_school_district_majority_white==1) %>% summarize(mean(owed_as_a_percentage_of_lot_value))
+Franklin_data %>% filter(is_school_district_majority_white==1) %>% summarize(median(owed_as_a_percentage_of_lot_value))
+Franklin_data %>% filter(is_school_district_majority_white==0) %>% summarize(mean(owed_as_a_percentage_of_lot_value))
+Franklin_data %>% filter(is_school_district_majority_white==0) %>% summarize(median(owed_as_a_percentage_of_lot_value))
+
+
+
+Franklin_data %>% filter(is_school_district_majority_white==1) %>% summarize(mean(Property_Value))
+Franklin_data %>% filter(is_school_district_majority_white==1) %>% summarize(median(Property_Value))
+Franklin_data %>% filter(is_school_district_majority_white==0) %>% summarize(mean(Property_Value))
+Franklin_data %>% filter(is_school_district_majority_white==0) %>% summarize(median(Property_Value))
+
+Franklin_data %>% filter(is_school_district_majority_white==1) %>% summarize(mean(Amount_Owed))
+Franklin_data %>% filter(is_school_district_majority_white==1) %>% summarize(median(Amount_Owed))
+Franklin_data %>% filter(is_school_district_majority_white==0) %>% summarize(mean(Amount_Owed))
+Franklin_data %>% filter(is_school_district_majority_white==0) %>% summarize(median(Amount_Owed))
+```
+
+Foreclosures in majority white school districts versus not
+```{r}
+Franklin_data %>% filter(is_school_district_majority_white==1) %>% summarize(sum(Gov_Foreclosure))
+Franklin_data %>% filter(is_school_district_majority_white==0) %>% summarize(sum(Gov_Foreclosure))
+```
+
+
+
+Franklin parcels
+
+```{r}
+Franklin_data %>% filter(Gov_Foreclosure==1) %>% nrow()
+
+Franklin_data %>% arrange(desc(owed_as_a_percentage_of_lot_value)) %>% top_n(201) %>% summarize(sum(Gov_Foreclosure))
+
+Franklin_data %>% arrange(desc(Amount_Owed)) %>% top_n(201) %>% summarize(sum(Gov_Foreclosure))
+
+```
+
+How much did land bank parcels owe?
+
+```{r}
+Franklin_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Amount_Owed))
+Franklin_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(Amount_Owed))
+
+Franklin_data %>% arrange(desc(Amount_Owed)) %>% top_n(201) %>% summarize(mean(Amount_Owed))
+Franklin_data %>% arrange(desc(Amount_Owed)) %>% top_n(201) %>% summarize(median(Amount_Owed))
+```
+
+How many were still delinquent three years later?
+```{r}
+Franklin_Worst_Offenders <- Franklin_data %>% arrange(desc(Amount_Owed)) %>% top_n(201) %>% filter(`Parcel Number` %in% Franklin_Delinquents_to_2021$`PARCELID      `) 
+
+datatable(Franklin_Worst_Offenders)
+```
+
+
+
+###Hamilton County
+
+
+First, figuring out which properties are land bank properties. We got this through a FOIA
+
+```{r} 
+Hamilton_LB <- rio::import("Hamilton County_Public Record Request 7-21- LB properties.csv")
+
+```
+
+
+And now finding delinquents 
+
+https://www.hamiltoncountyauditor.org/textonly/tax_delinquent.asp
+
+For whatever reason, the 2018 file does not have valuations, whereas from 2019 on they do.
+
+```{r}
+
+Hamilton_Delinquent_2018 <- rio::import("Hamilton AdvertisedDelinquentFile2018.xlsx")
+
+
+setwd("~/Code//Housing_Equity_2/Hamilton Delinquents/")
+
+list_of_files <- list.files(path = ".", recursive = TRUE,
+                            pattern = "\\.xlsx$", 
+                            full.names = TRUE)
+
+
+suppressWarnings(Hamilton_Delinquent <- list_of_files %>%
+  purrr::set_names(nm = (basename(.) %>% tools::file_path_sans_ext())) %>%
+  purrr::map_df(read_excel,  col_types= c("text","text","text","numeric","numeric","numeric")))
+
+```
+
+How much was owed each year?
+
+```{r}
+Hamilton_Delinquent_2018$assessed_value <- NA
+
+Hamilton_Delinquent <- rbind(Hamilton_Delinquent, Hamilton_Delinquent_2018)
+```
+
+How much was owed each year?
+
+```{r}
+  ggplot(Hamilton_Delinquent, aes(x=year,y=`delinquent amount`))+
+         geom_col()
+```
+
+
+Next, bringing in the map. Available through the [Cincinnati Open data portal](https://data.cincinnati-oh.gov/dataset/Hamilton-County-Parcel-Polygons/g24g-2pi5)
+
+Here is the [explainer.](
+
+```{r}
+
+Hamilton_Geo <-  sf::st_read("Hamilton_County_Parcel_Polygons/Hamilton_County_Parcel_Polygons.shp")
+
+```
+ From https://epsg.io/3735
+
+
+Let's take a look at where all those properties are. 
+
+```{r}
+
+Hamilton_LB <- Hamilton_LB %>% 
+mutate(PARCELID=str_replace_all(`Parcel Number`, "-","")) #So we can match them
+
+
+```
+
+
+Adding location polygons ot the land bank
+
+```{r}
+
+Hamilton_LB_Geo <- Hamilton_Geo %>% 
+  filter(AUDPTYID %in%  Hamilton_LB$PARCELID)
+```
+
+
+And plotting them
+
+And visualizing it. 
+
+```{r}
+Hamilton_LB_Geo <- st_as_sf(Hamilton_LB_Geo)
+
+plot(Hamilton_LB_Geo %>% select(AUDPTYID, geometry))
+```
+`
+
+
+
+And plotting them with a  background map
+
+```{r}
+Hamilton_LB_Geo <- st_transform(Hamilton_LB_Geo, crs = 4326)
+Hamilton_LB_Geo <- st_zm(Hamilton_LB_Geo, drop = T, what = "ZM")
+
+
+```
+
+
+```{r}
+Hamilton_Properties_plotted<- leaflet(data = Hamilton_LB_Geo) %>% 
+  addTiles() %>% 
+  setView(-84.5101141471773,39.1228041173139,zoom = 10) %>% #Set to Cincy Center
+  addPolygons(data=Hamilton_LB_Geo$geometry, options = tileOptions(minZoom = 0, maxZoom = 14, continuousWorld = T))
+  
+Hamilton_Properties_plotted
+```
+
+
+
+
+ Which of those delinquent 2018 properties eventually went to the land bank? 
+
+
+```{r}
+Hamilton_data <- Hamilton_Delinquent  %>% 
+  mutate(Gov_Foreclosure=if_else(property_number %in% Hamilton_LB$PARCELID, 1,0))
+```
+
+
+Some properties may be a duplicate, though. (It they were on the list for more than a year before going to the land bank.)
+
+```{r}
+Hamilton_data <- Hamilton_data %>% 
+  arrange(desc(Gov_Foreclosure)) %>% 
+  distinct(property_number, .keep_all = TRUE)
+```
+
+
+
+
+How many and what percent went to the Land Bank?
+
+```{r}
+sum(Hamilton_data$Gov_Foreclosure)
+
+nrow(Hamilton_data)
+
+sum(Hamilton_data$Gov_Foreclosure)/(nrow(Hamilton_data))
+
+```
+
+
+
+
+###Bringing in the school district
+
+This comes from https://data.cincinnati-oh.gov/dataset/Hamilton-County-School-Districts/unpr-qxaj
+
+Hmmm. The parcel shapefile does not include school district. (Despite having columns "SCHOOL_C_1" and "SCHOOL_COD" which are all NA.)
+
+So we'll heve to bring in the school districts shapefile. 
+
+```{r}
+
+Hamilton_Schools_Geo <-  sf::st_read("Hamilton_County_School_Districts/Hamilton_County_School_Districts.shp")
+
+
+
+Hamilton_School_Data <-  Hamilton_Geo %>% 
+  filter(AUDPTYID %in% Hamilton_data$property_number)
+
+
+                                                             
+Hamilton_School_Data <- st_join(Hamilton_School_Data, Hamilton_Schools_Geo, join = st_within)
+  
+```
+
+```{r}
+Hamilton_School_Data %>% group_by(AUDPTYID) %>%  count(NAME.y) 
+
+```
+
+
+
+
+
+
+
+
+Because we had to geolocate the parcels within the school districts, this wipes our previous data, so adding it back in now. 
+
+```{r}
+Hamilton_data <- Hamilton_data  %>% 
+  mutate(Gov_Foreclosure=if_else(AUDPTYID %in% Hamilton_LB$PARCELID, 1,0))
+```
+
+
+How many and what percent went to the Land Bank?
+
+```{r}
+sum(Hamilton_data$Gov_Foreclosure)
+
+nrow(Hamilton_data)
+
+sum(Hamilton_data$Gov_Foreclosure)/(nrow(Hamilton_data))
+
+```
+
+Note: so this means 4 properties were not in a school district. 
+
+And a few properties came up in two school districts. 
+
+
+
+
+A few things about this data: 
+*They write "<10" for small categories less than 10, instead of an actual number. 
+*Unlike on the website, this has decimals. How do you have part of a kid? Clarification from the Ohio Dept of education's Mandy Minick: "we count students as full time equivalents (FTEs) based on the length of time they are enrolled.  A student enrolled all year counts as 1.0 FTE in the total.  A student enrolled for half a year is 0.5 FTEs and so on.  We sum all the FTEs across the entire year (hence, the decimals). The spreadsheet on the left shows the decimals (33.188847), while the one on the right is rounded to the closest whole number for ease of reading."
+
+
+
+```{r}
+
+Hamilton_schools_demographic <- read_xlsx("All School districts Demographic info.xlsx", skip = 2) 
+
+Hamilton_schools_demographic  <- Hamilton_schools_demographic %>% 
+  filter(str_detect(District, "Hamilton|Milford"))
+
+head(Hamilton_schools_demographic)
+```
+
+
+How many kids are in each district?
+
+We are going to have to _estimate_ here, because if there's less than 10, they don't report the number.
+
+```{r}
+Hamilton_schools_demographic_no_remainders <- Hamilton_schools_demographic %>% 
+  filter(CountOfEnrolledStudents!="<10")
+
+  
+Hamilton_schools_demographic_no_remainders$CountOfEnrolledStudents <- as.double(Hamilton_schools_demographic_no_remainders$CountOfEnrolledStudents)
+
+Hamilton_school_pop <- Hamilton_schools_demographic_no_remainders%>% 
+  group_by(District) %>% 
+    summarize(Total=sum(CountOfEnrolledStudents))
+
+datatable(Hamilton_school_pop)
+```
+
+Here we are going to treat race and socioeconomic status as factors, even though we have numbers. Why? 
+
+These variables are going to affect our data in a categorical way. You either are discriminating on race or class or you are not. The amount of discrimination does not depend on the amount of people. For example, in the [Kaggle Titantic competition](https://www.kaggle.com/c/titanic) (which is great way to learn machine learning!) The passengers' ticket price is listed. Which passengers were more likely to survive?
+
+You are more likely to survive _if you have a first class ticket_. Period. If your first class ticket costs twice as much as the next first class ticket, that didn't make you twice as likely to survive as someone with a ticket half that price. 
+
+Which school districts have large minority populations? Which have populations with a high number of kids in poverty? 
+
+
+Finding percentage of minority by District: 
+```{r}
+Hamilton_schools_by_race <- Hamilton_schools_demographic_no_remainders %>% 
+  group_by(District,`Race/Ethnicty`,) %>% #typo in original for 'ethnicity'
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Hamilton_schools_by_race)
+```
+
+```{r}
+Hamilton_schools_by_race %>% 
+  filter(`Race/Ethnicty`=="White, Non-Hispanic") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+
+
+Finding percent disadvantaged by district: 
+ 
+```{r}
+Hamilton_schools_by_poverty <- Hamilton_schools_demographic_no_remainders %>% 
+  group_by(District,Subgroup,) %>% 
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Hamilton_schools_by_poverty)
+```
+
+```{r}
+Hamilton_schools_by_poverty %>% 
+  filter(Subgroup=="Economic Disadvantaged") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+And categorizing them: 
+
+```{r}
+Hamilton_schools_by_race_with_majority_white <- Hamilton_schools_by_race %>% 
+  group_by(District) %>% 
+summarize(Majority_White=if_else(`Race/Ethnicty`=="White, Non-Hispanic"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_White_District=if_else(sum(Majority_White)==1,1,0))
+  
+
+Hamilton_schools_with_majority_disadvantaged <- Hamilton_schools_by_poverty %>% 
+  group_by(District) %>% 
+summarize(Majority_Disadvantaged=if_else(Subgroup=="Economic Disadvantaged"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_Disadvantaged_District=if_else(sum(Majority_Disadvantaged)==1,1,0))
+
+  
+```
+
+
+
+
+The names of school districts is the same but listed a bit differently in both data sets, so we have to do a bit of manual matching here. 
+
+```{r}
+Hamilton_data <- Hamilton_data %>% 
+  rename(School_District=NAME.y) %>% 
+  mutate(School_Dest_Standardized= case_when(
+     School_District== "CINCINNATI PUBLIC SCHOOLS" ~"Cincinnati Public Schools - 043752 (Hamilton)" ,
+      School_District== "FOREST HILLS LOCAL SCOOLS" ~ "Forest Hills Local - 047340 (Hamilton)"  , #TYPO IN ORIGINAL
+     School_District=="NORWOOD CITY SCHOOLS"  ~ "Norwood City - 044578 (Hamilton)"   ,     
+     School_District=="MADERIA CITY SCHOOLS"~"Madeira City - 044289 (Hamilton)"   ,      
+     School_District=="PRINCETON CITY SCHOOLS"~"Princeton City - 044677 (Hamilton)" ,
+     School_District=="NORTHWEST LOCAL SCHOOLS"~ "Northwest Local - 047365 (Hamilton)" ,
+     School_District=="WYOMING CITY SCHOOLS"~"Wyoming City - 045146 (Hamilton)"   ,   
+     School_District=="OAK HILL LOCAL SCHOOLS"~ "Oak Hills Local - 047373 (Hamilton)"  , 
+    School_District== "THREE RIVER LOCAL SCHOOLS" ~ "Three Rivers Local - 047399 (Hamilton)" , 
+     School_District=="MOUNT HEALTHY CITY SCHOOLS"~"Mt Healthy City - 044412 (Hamilton)",
+     School_District=="DEER PARK CITY SCHOOLS"~ "Deer Park Community City - 043851 (Hamilton)"  ,     
+     School_District=="WINTON WOODS LOCAL SCHOOLS"~"Winton Woods City - 044081 (Hamilton)"   ,
+     School_District=="INDIAN HILL SCHOOLS"~  "Indian Hill Exempted Village - 045435 (Hamilton)"  ,
+     School_District=="NORTH COLLEGE HILL CITY SCHOOL"~"North College Hill City - 044511 (Hamilton)"  ,  
+     School_District=="FINNEYTOWN LOCAL SCHOOLS"~ "Finneytown Local - 047332 (Hamilton)" ,
+     School_District=="MARIEMONT CITY SCHOOLS" ~"Mariemont City - 044313 (Hamilton)" ,
+    School_District== "SYCAMORE LOCAL SCOOLS" ~ "Sycamore Community City - 044867 (Hamilton)"  ,      #TYPO IN ORIGINAL
+     School_District=="SOUTHWEST LOCAL SCHOOLS" ~"Southwest Local - 047381 (Hamilton)",   
+     School_District== "ST BERNARD CITY SCHOOLS"~ "St Bernard-Elmwood Place City - 044719 (Hamilton)" ,
+    School_District==  "LOVELAND CITY SCHOOLS"~"Loveland City - 044271 (Hamilton)" ,
+     School_District=="LOCKLAND CITY SCHOOLS" ~"Lockland Local - 044230 (Hamilton)",         
+     School_District=="READING CITY SCHOOLS"~ "Reading Community City - 044693 (Hamilton)" ,
+     School_District=="MILFORD CITY SCHOOLS" ~    "Milford Exempted Village - 045500 (Clermont)" 
+     ))
+
+
+```
+
+And here we incorporate race and socioeconomic status as factors. 
+
+```{r}
+
+
+Hamilton_data$is_school_district_majority_white <- Hamilton_schools_by_race_with_majority_white$Majority_White_District[match(Hamilton_data$School_Dest_Standardized,Hamilton_schools_by_race_with_majority_white$District)]
+
+Hamilton_data$is_school_district_majority_disadvantaged <- Hamilton_schools_with_majority_disadvantaged$Majority_Disadvantaged_District[match(Hamilton_data$School_Dest_Standardized,Hamilton_schools_with_majority_disadvantaged$District)]
+
+
+```
+
+
+Five of these have multiple answers. 
+
+PROPTYID       
+00960002026600 - Auditor's files says CINCINNATI CSD  
+01750018004700 - Cincy CSD  
+05000214027100    FOREST HILLS LSD 
+05000214027900   FOREST HILLS LSD 
+05500323045100     OAK HILLS LSD
+
+```{r}
+#Hamilton_data <- Hamilton_data %>% 
+  #filter(!PROPTYID=="00960002026600" & Hamilton_data$School_Dest_Standardized !="Cincinnati Public Schools - 043752 (Hamilton)") %>% 
+  #filter(!PROPTYID=="01750018004700" & School_Dest_Standardized !="Cincinnati Public Schools - 043752 (Hamilton)") %>% 
+  #filter(!PROPTYID=="05000214027100" & School_Dest_Standardized !="Forest Hills Local - 047340 (Hamilton)") %>% 
+  #filter(!PROPTYID=="05000214027900" & School_Dest_Standardized !="Forest Hills Local - 047340 (Hamilton)") %>% 
+  #filter(!PROPTYID=="05500323045100" & School_Dest_Standardized !="Oak Hills Local - 047373 (Hamilton)" ) 
+```
+
+
+```{r}
+Hamilton_data <- Hamilton_data %>% 
+  filter(!PROPTYID=="00960002026600") %>% 
+  filter(!PROPTYID=="01750018004700") %>% 
+  filter(!PROPTYID=="05000214027100") %>% 
+  filter(!PROPTYID=="05000214027900") %>% 
+  filter(!PROPTYID=="05500323045100") 
+```
+
+
+
+
+Next, we want to see if the location near valuable property is a factor. 
+
+
+Where are the high-value properties?
+
+```{r}
+
+Hamilton_Geo_Millions <- filter(Hamilton_Geo, MKT_TOTAL_>10000000)
+
+```
+
+
+How close are they to our properties?
+
+```{r }
+library(lwgeom)
+
+sf::sf_use_s2(FALSE)
+
+Hamilton_Distance_Matrix <- as.data.frame(st_distance(  Hamilton_Geo_Millions$geometry, Hamilton_data$geometry,)) #This takes quite a while just FYI
+
+
+
+  #Sets column names
+  
+Hamilton_Distance_Matrix1 <- Hamilton_Distance_Matrix %>% 
+  `colnames<-`(Hamilton_data$PROPTYID ) %>% 
+  
+  #Adds a column containing names so that each row now also has a name
+  cbind(name = Hamilton_Geo_Millions$PROPTYID  ) 
+#Hamilton_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Hamilton Distance Matrix as well.
+
+```
+
+
+
+
+
+Removing the units 
+
+```{r}
+library(units)
+Hamilton_Distance_Matrix_No_Units <- drop_units(Hamilton_Distance_Matrix1)
+```
+
+
+Finding the number of high-value parcels within half a mile of the delinquent properties. 
+
+```{r}
+Hamilton_Number_Near <- Hamilton_Distance_Matrix_No_Units %>%                                                                                  
+  dplyr::summarise_all(~sum(.<2640, na.rm = TRUE))
+```
+
+And for comparison, also the number twice as far. 
+
+```{r}
+Hamilton_Number_Semi_Near <- Hamilton_Distance_Matrix_No_Units %>%                                                                           
+  dplyr::summarise_all(~sum(.<5280, na.rm = TRUE))
+```
+
+```{r}
+Hamilton_Distance_Info1 <-Hamilton_Number_Near %>% 
+  select(-name) %>% 
+  pivot_longer("06510026000700":"05100031051600", names_to = "PARCELID", values_to = "number_of_high_value_properties_within_half_mile" )
+```
+
+```{r}
+Hamilton_Distance_Info2 <-Hamilton_Number_Semi_Near %>% 
+  select(-name) %>% 
+  pivot_longer("06510026000700":"05100031051600", names_to = "PARCELID", values_to = "number_of_high_value_properties_within_mile" )
+```
+
+
+Adding them together
+
+```{r}
+Hamilton_data <- left_join(Hamilton_data, Hamilton_Distance_Info1, by="PARCELID")
+Hamilton_data <- left_join(Hamilton_data, Hamilton_Distance_Info2, by="PARCELID")
+```
+
+Which properties were just near expensive properties, period?
+```{r}
+Hamilton_data  <- Hamilton_data %>% 
+  mutate(Within_half_mile=if_else(number_of_high_value_properties_within_half_mile>=1,1,0)) %>% 
+ mutate(Within_mile=if_else(number_of_high_value_properties_within_mile>=1,1,0))          
+```
+
+
+Adding in the amount of delinquency. Remember the properties that didn't pay in 2017 (Certified delinquent in 2018) don't have an assessed value for that year. 
+
+```{r}
+Hamilton_data$delinquent_amount <- Hamilton_Delinquent$`delinquent amount`[match(Hamilton_data$AUDPTYID, Hamilton_Delinquent$property_number)]
+
+```
+
+```{r}
+summary(Hamilton_data$delinquent_amount)
+```
+
+
+```{r}
+#Hamilton_data <- Hamilton_data %>% 
+  #filter(NETDELQ>0)
+```
+
+Note: some properties are listed with a value of 0. 
+```{r}
+#Hamilton_data <- Hamilton_data %>% 
+  #filter(ASMTTOTAL>0)
+```
+
+Converting percent owed
+```{r}
+#Hamilton_data <- Hamilton_data %>% 
+  #mutate(owed_as_a_percentage_of_lot_value=NETDELQ/ASMTTOTAL)
+```
+
+And now for the machine learning part
+
+
+
+```{r}
+stack_overflow <- as.data.frame(Hamilton_data)
+
+
+stack_overflow <- stack_overflow %>% 
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor) #%>% filter(delinquent_amount>1023)
+   #mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+    select("Gov_Foreclosure", delinquent_amount,
+      #owed_as_a_percentage_of_lot_value,                                                        
+      #"is_school_district_majority_white",
+          #"is_school_district_majority_disadvantaged",
+           #"number_of_high_value_properties_within_half_mile", #not stastically significant 
+     # "number_of_high_value_properties_within_mile",   
+           #"Within_half_mile",   
+           #"Within_mile"       
+    )
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
+
+Hamilton parcels
+
+```{r}
+Hamilton_data %>% filter(Gov_Foreclosure==1) %>% nrow()
+
+as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% summarize(sum(Gov_Foreclosure))
+
+```
+
+How much did land bank parcels owe?
+
+```{r}
+as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(delinquent_amount))
+as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==1) %>% summarize(median(delinquent_amount))
+
+as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% summarize(mean(delinquent_amount))
+as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% summarize(median(delinquent_amount))
+```
+
+How many were still delinquent three years later?
+```{r}
+Hamilton_Worst_Offenders <- as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% filter(AUDPTYID %in% Hamilton_Delinquent$property_number) 
+
+datatable(Hamilton_Worst_Offenders)
+```
+
+### Athens County
+
+First, figuring out which properties are land bank properties. We got this from a FOIA. 
+
+```{r} 
+Athens_LB <- rio::import("Athens LAND BANK Properties.xlsx")
+
+```
+
+
+And now finding delinquents. We got this from a FOIA.
+
+```{r}
+
+
+setwd("~/Code//Housing_Equity_2/Athens delinquents all redocumentrequest/")
+
+list_of_files <- list.files(path = ".", recursive = TRUE,
+                            pattern = "\\.xlsx$", 
+                            full.names = TRUE)
+
+
+suppressWarnings(Athens_Delinquent <- list_of_files %>%
+  purrr::set_names(nm = (basename(.) %>% tools::file_path_sans_ext())) %>%
+  purrr::map_df(read_excel,  col_types=c("text","text","numeric","numeric"), .id = "File_Name"))
+
+
+
+
+```
+
+
+How much was owed each year?
+
+```{r}
+  ggplot(Athens_Delinquent, aes(x=`Yr Cert`, y=Amount))+
+         geom_col()
+```
+
+
+Missing 2016 here for some reason, so bringing in the list of people who first went delinquent in 2016. Checked with the Auditor's office, and they are not sure why that is. So we are only going to use the 2017 file and later
+
+```{r}
+Athens_Delinquent <- Athens_Delinquent %>% 
+  filter(!File_Name=="Cert Delq_2015") %>% 
+  filter(!File_Name=="Cert Delq_2016")
+```
+
+
+So for our purposes, we're just going to see, of the properties behind on their taxes in 2018-2020, how many eventually went to the land bank?
+
+To prevent duplicates: 
+```{r}
+Athens_Delinquent <- Athens_Delinquent %>% 
+  arrange(desc(Amount)) %>% 
+  distinct(Parcel, .keep_all = TRUE)
+```
+
+
+
+Next, bringing in the map. Available through the Athens County GIS site: https://gis.data.athensoh.org/datasets/parcels/explore
+
+```{r}
+setwd("Athens Parcels")
+Athens_Geo <- sf::st_read("Parcels.shp")
+
+head(Athens_Geo)
+
+```
+
+
+Let's take a look at where all those properties are. 
+
+```{r}
+Athens_LB_Geo <- Athens_Geo %>% 
+  filter(PARID %in%  Athens_LB$`PARCEL NUMBER`)
+
+```
+
+
+And visualizing it. 
+
+```{r}
+Athens_LB_Geo <- st_as_sf(Athens_LB_Geo)
+
+plot(Athens_LB_Geo %>% select(PARID, geometry))
+```
+
+
+And plotting them with a  background map
+
+```{r}
+Athens_LB_Geo <- st_transform(Athens_LB_Geo, crs = 4326)
+
+Athens_Properties_plotted <- leaflet(data = Athens_LB_Geo) %>% 
+  addTiles() %>% 
+  setView(-82.10358921872793, 39.329083533663194, zoom = 10) %>% #Set to Athens Center
+  addPolygons(popup = paste("parcel number:",Athens_LB_Geo$PARID))
+  
+Athens_Properties_plotted
+```
+
+
+
+ Which of those delinquent properties eventually went to the land bank, or went through a government forclosure, or were given to the land bank?? 
+
+
+```{r}
+Athens_data <- Athens_Delinquent  %>% 
+  mutate(Gov_Foreclosure=if_else(Parcel %in% Athens_LB$`PARCEL NUMBER`, 1,0))
+```
+
+
+How many and what percent went to the Land Bank?
+
+```{r}
+sum(Athens_data$Gov_Foreclosure)
+
+nrow(Athens_data)
+
+sum(Athens_data$Gov_Foreclosure)/(nrow(Athens_data))
+
+```
+
+
+
+
+###Bringing in the school district
+
+It looks like Athens county has all [open enrollment](https://education.ohio.gov/getattachment/Topics/Ohio-Education-Options/Open-Enrollment/Open-Enrollment-Certification.pdf.aspx?lang=en-US) so we are not going to add this to our dataset. But just a glimpse of the school district as we have this code already set up: 
+
+
+
+```{r}
+
+
+Athens_data$School_District <- Athens_Geo$SCHLDSCRP[match(Athens_data$PARCELID, Athens_Geo$PARCELID)]
+  
+```
+
+
+
+A few things about this data: 
+*They write "<10" for small categories less than 10, instead of an actual number. 
+*Unlike on the website, this has decimals. How do you have part of a kid? Clarification from the Ohio Dept of education's Mandy Minick: "we count students as full time equivalents (FTEs) based on the length of time they are enrolled.  A student enrolled all year counts as 1.0 FTE in the total.  A student enrolled for half a year is 0.5 FTEs and so on.  We sum all the FTEs across the entire year (hence, the decimals). The spreadsheet on the left shows the decimals (33.188847), while the one on the right is rounded to the closest whole number for ease of reading."
+
+N
+
+```{r}
+
+Athens_schools_demographic <- read_xlsx("All School districts Demographic info.xlsx", skip = 2) 
+
+Athens_schools_demographic  <- Athens_schools_demographic %>% 
+  filter(str_detect(District, "Athens")) 
+
+
+head(Athens_schools_demographic)
+```
+
+
+How many kids are in each district?
+
+We are going to have to _estimate_ here, because if there's less than 10, they don't report the number.
+
+```{r}
+Athens_schools_demographic_no_remainders <- Athens_schools_demographic %>% 
+  filter(CountOfEnrolledStudents!="<10")
+
+  
+Athens_schools_demographic_no_remainders$CountOfEnrolledStudents <- as.double(Athens_schools_demographic_no_remainders$CountOfEnrolledStudents)
+
+Athens_school_pop <- Athens_schools_demographic_no_remainders%>% 
+  group_by(District) %>% 
+    summarize(Total=sum(CountOfEnrolledStudents))
+
+datatable(Athens_school_pop)
+```
+
+Here we are going to treat race and socioeconomic status as factors, even though we have numbers. Why? 
+
+These variables are going to affect our data in a categorical way. You either are discriminating on race or class or you are not. The amount of discrimination does not depend on the amount of people. For example, in the [Kaggle Titantic competition](https://www.kaggle.com/c/titanic) (which is great way to learn machine learning!) The passengers' ticket price is listed. Which passengers were more likely to survive?
+
+You are more likely to survive _if you have a first class ticket_. Period. If your first class ticket costs twice as much as the next first class ticket, that didn't make you twice as likely to survive as someone with a ticket half that price. 
+
+Which school districts have large minority populations? Which have populations with a high number of kids in poverty? 
+
+
+Finding percentage of minority by District: 
+```{r}
+Athens_schools_by_race <- Athens_schools_demographic_no_remainders %>% 
+  group_by(District,`Race/Ethnicty`,) %>% #typo in original for 'ethnicity'
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Athens_schools_by_race)
+```
+
+```{r}
+Athens_schools_by_race %>% 
+  filter(`Race/Ethnicty`=="White, Non-Hispanic") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+
+
+Finding percent disadvantaged by district: 
+ 
+```{r}
+Athens_schools_by_poverty <- Athens_schools_demographic_no_remainders %>% 
+  group_by(District,Subgroup,) %>% 
+  summarize(Total=sum(CountOfEnrolledStudents)) %>% 
+  ungroup() %>% 
+  group_by(District) %>% 
+  mutate(Percent=Total/sum(Total))
+            
+datatable(Athens_schools_by_poverty)
+```
+
+```{r}
+Athens_schools_by_poverty %>% 
+  filter(Subgroup=="Economic Disadvantaged") %>% 
+  ggplot(aes(x=reorder(District, -Percent), y=Percent))+
+           geom_col()+
+  theme(axis.text.x = element_text(angle = 45, vjust=1.1, hjust = 1.1, size = 11))
+```
+
+
+And categorizing them: 
+
+```{r}
+Athens_schools_by_race_with_majority_white <- Athens_schools_by_race %>% 
+  group_by(District) %>% 
+summarize(Majority_White=if_else(`Race/Ethnicty`=="White, Non-Hispanic"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_White_District=if_else(sum(Majority_White)==1,1,0))
+  
+
+Athens_schools_with_majority_disadvantaged <- Athens_schools_by_poverty %>% 
+  group_by(District) %>% 
+summarize(Majority_Disadvantaged=if_else(Subgroup=="Economic Disadvantaged"&Percent>0.5,1,0)) %>% 
+  group_by(District) %>% 
+  summarize(Majority_Disadvantaged_District=if_else(sum(Majority_Disadvantaged)==1,1,0))
+
+  
+```
+
+How are the school districts represented in our delinquent dataset?
+
+```{r}
+#Athens_Delinquents_by_School_District <- Athens_data %>% group_by(`School_District`) %>% summarize(Total=n())
+#datatable(Athens_Delinquents_by_School_District)
+
+```
+
+
+
+Adding in locations
+
+```{r}
+Athens_data$geometry <- Athens_Geo$geometry[match(Athens_data$Parcel,Athens_Geo$PARID)]
+```
+
+
+Next, we want to see if the location near valuable property is a factor. 
+
+What are values like in Athens?
+
+```{r}
+ggplot(Athens_Geo, aes(x=LUC, y=APRVALUE))+
+  geom_boxplot()
+```
+This is hard to read unless you expand it, but the value of properties in Athens based on the [Land Use Code](https://codes.ohio.gov/ohio-administrative-code/rule-5703-25-10)
+
+```{r}
+Athens_Upper_Middle_Class <- Athens_Geo %>% filter(LUC==510)
+
+summary(Athens_Upper_Middle_Class$APRVALUE)
+
+Athens_Upper_Middle_Class <- filter(Athens_Upper_Middle_Class, APRVALUE>161730)
+```
+
+
+
+
+Where are the high-value properties?
+
+```{r}
+
+Athens_Distance <- filter(Athens_Geo, PARID=="A027050000100")##Main campus polygon
+
+```
+
+
+
+How close are they to our properties?
+
+```{r }
+library(lwgeom)
+
+sf::sf_use_s2(FALSE)
+
+Athens_Distance_Matrix <- as.data.frame(st_distance(  Athens_Distance$geometry, Athens_data$geometry)) #This takes quite a while just FYI
+
+
+
+  #Sets column names
+  
+Athens_Distance_Matrix1 <- Athens_Distance_Matrix %>% 
+  `colnames<-`(Athens_data$Parcel ) %>% 
+  
+  #Adds a column containing names so that each row now also has a name
+    cbind(name = Athens_Distance$PARID ) 
+#Athens_Distance_Matrix1 is the same as Athens_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep the first as well.
+
+```
+
+
+
+Removing the units 
+
+```{r}
+library(units)
+Athens_Distance_Matrix_No_Units <- drop_units(Athens_Distance_Matrix1)
+```
+
+
+Finding the number of high-value parcels within half a mile of the delinquent properties. 
+
+```{r}
+Athens_Number_Near <- Athens_Distance_Matrix_No_Units %>%                                                                                  
+  dplyr::summarise_all(~sum(.<2640, na.rm = TRUE))
+```
+
+And for comparison, also the number twice as far. 
+
+```{r}
+Athens_Number_Semi_Near <- Athens_Distance_Matrix_No_Units %>%                                                                           
+  dplyr::summarise_all(~sum(.<5280, na.rm = TRUE))
+```
+
+```{r}
+Athens_Distance_Info1 <-Athens_Distance_Matrix_No_Units %>% 
+  select(-name) %>% 
+  pivot_longer("F010010008800":"P010010026508", names_to = "Parcel", values_to = "Distance_To_Main_Campus" )
+```
+
+
+Adding them together
+
+```{r}
+Athens_data <- left_join(Athens_data, Athens_Distance_Info1, by="Parcel")
+
+
+```{r}
+Athens_data %>% nrow()
+Athens_data %>% filter(Distance_To_Main_Campus>6437) %>% count()
+Athens_data %>% filter(Distance_To_Main_Campus<6437) %>% count()
+
+Athens_data %>% filter(Distance_To_Main_Campus>6437) %>% summarize(sum(Amount))
+Athens_data %>% filter(Distance_To_Main_Campus<6437)%>% summarize(sum(Amount))
+
+
+Athens_data %>% filter(Distance_To_Main_Campus>6437) %>% summarize(median(Amount))
+Athens_data %>% filter(Distance_To_Main_Campus<6437)%>% summarize(median(Amount))
+
+Athens_data %>% filter(Distance_To_Main_Campus>6437) %>% summarize(mean(Amount))
+Athens_data %>% filter(Distance_To_Main_Campus<6437)%>% summarize(mean(Amount))
+```
+
+
+
+
+
+Adding in the lot value
+
+```{r}
+Athens_data$Property_Value <- Athens_Geo$APRVALUE[match(Athens_data$Parcel, Athens_Geo$PARID)]
+
+Athens_data <- Athens_data %>% 
+  mutate(Near_Or_Far_From_Athens=if_else(Distance_To_Main_Campus>6347,"far","near","NA"))
+                                                          
+```
+
+
+
+
+Converting percent owed
+```{r}
+Athens_data <- Athens_data %>% 
+  mutate(owed_as_a_percentage_of_lot_value=Amount/Property_Value)
+```
+
+And now for the machine learning part
+
+
+
+```{r}
+stack_overflow <- as.data.frame(Athens_data)
+
+
+stack_overflow <- stack_overflow %>% 
+  filter(Amount>1470) %>% # Top Quarter
+    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
+    mutate_if(is.character, factor) %>% 
+   mutate(Within_half_mile = factor(Within_half_mile, levels = c(1,0)))
+
+
+# Create stack_select dataset
+stack_select <- stack_overflow %>%
+    select("Gov_Foreclosure",
+           Amount,
+           #Near_Or_Far_From_Athens
+      #owed_as_a_percentage_of_lot_value,                                                        
+      #"is_school_district_majority_white",
+          #"is_school_district_majority_disadvantaged",
+           #"number_of_high_value_properties_within_half_mile",
+      #"number_of_high_value_properties_within_mile",   
+           #"Within_half_mile",   
+           #"Within_mile"       
+    )
+
+#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
+
+# Split the data into training and testing sets
+set.seed(1234)
+stack_split <- stack_select %>%
+    initial_split(prop = 0.8,
+                  strata = Gov_Foreclosure)
+
+stack_train <- training(stack_split)
+stack_test <- testing(stack_split)
+
+glimpse(stack_train)
+glimpse(stack_test)
+```
+
+Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
+
+
+Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
+
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+stack_prep <- prep(stack_recipe)
+
+stack_down <- bake(stack_prep, new_data = NULL)
+
+stack_down %>%
+    count(Gov_Foreclosure)
+```
+
+Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
+
+First, we're going to build a logistical regression model
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+glm_spec <- logistic_reg() %>%
+    set_engine("glm")
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_glm <- stack_wf %>%
+    add_model(glm_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_glm
+```
+
+
+Next, we're going to build a decision tree model. 
+
+```{r}
+stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
+    step_downsample(Gov_Foreclosure)
+
+tree_spec <- decision_tree() %>%         
+    set_engine("rpart") %>%      
+    set_mode("classification") 
+
+## Start a workflow (recipe only)
+stack_wf <- workflow() %>%
+    add_recipe(stack_recipe)
+
+## Add the model and fit the workflow
+stack_tree <- stack_wf %>%
+    add_model(tree_spec) %>%
+    fit(data = stack_train)
+
+# Print the fitted model
+stack_tree
+```
+
+Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class))
+
+# Confusion matrix for logistic regression model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
+```
+
+
+Confusion Maxtrix for decision tree model
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+# Confusion matrix for decision tree model
+results %>%
+    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Now let's calculate the accuracy of our results: 
+
+```{r}
+results <- stack_test %>%
+    bind_cols(predict(stack_glm, stack_test) %>%
+                  rename(.pred_glm = .pred_class)) %>%
+    bind_cols(predict(stack_tree, stack_test) %>%
+                  rename(.pred_tree = .pred_class))
+
+## Calculate accuracy
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+
+## Calculate positive predict value
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
+ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
+```
+
+Which variables are particularly important? 
+
+
+```{r}
+vip_tree <- extract_fit_parsnip(stack_tree)$fit
+vip_tree$variable.importance
+```
+Looking at the importance in the logistic regression: 
+```{r}
+datatable(tidy(stack_glm))
+
+```
+
+Athens parcels
+
+```{r}
+summary(Athens_data$Amount)
+
+Athens_data %>% filter(Gov_Foreclosure==1) %>% nrow()
+
+Athens_data %>% arrange(desc(Amount)) %>% top_n(115) %>% summarize(sum(Gov_Foreclosure))
+
+
+
+```
+
+How much did land bank parcels owe?
+
+```{r}
+Athens_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Amount))
+Athens_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(Amount))
+
+Athens_data %>% top_n(Amount, 115) %>% summarize(mean(Amount))
+Athens_data %>% top_n(Amount, 115) %>% summarize(median(Amount))
+
+Athens_data %>% filter(Amount>1470) %>% summarize(mean(Amount)) # Top Quarter
+Athens_data %>% filter(Amount>1470) %>% summarize(median(Amount))
+
+
+```
+
+
+```{r}
+Athens_data %>% summarize(sum(Within_half_mile))
+```
+
+
+
+
+
+
+
+How many were still delinquent three years later?
+```{r}
+Athens_Worst_Offenders <- Athens_data %>% arrange(desc(Amount)) %>% top_n(115) %>% filter(`Parcel Number` %in% Athens_Delinquents_to_2021$`PARCELID      `) 
+
+datatable(Athens_Worst_Offenders)
+```

@@ -32,7 +32,7 @@ TransferHistory <- rio::import("TRANSFER_HISTORY_CUYAHOGA_COUNTY.txt") # Warning
 
 Oh boy ~2.8 million transfers! 
 
-```{r pressure, echo=FALSE}
+```{r }
 #Date is a Character, and we need the recorded date as a date
 TransferHistory$Transfer_date <- dmy(TransferHistory$TRANSFER_DATE)
 
@@ -52,7 +52,7 @@ And the effective date is April 7, 2009.
 
 
 ```{r}
-Transfer_History_Post_April09 <-filter(TransferHistory, Transfer_date>"2009-04-06")
+Transfer_History_Post_April09 <-filter(TransferHistory, Transfer_date>"2009-04-06"&Transfer_date<"2021-12-31")
 rm(TransferHistory)# To give your computer memory a break
 ```
 
@@ -262,7 +262,7 @@ This is awesome but for some reason the column names are not the same as the web
 ```{r}
 Cuyahoga_geo <- Cuyahoga_geo %>% 
   rename(parcel_year=parcel_yea,
-         Transfer_date=transfer_d,
+         Transfer_Date=transfer_d,#this was causing an issue
          Tax_Legal_Use_Description=tax_luc_de,
          Property_Class=property_c,
          Certified_Tax_Legal_Use_Classification=certified_,
@@ -644,8 +644,8 @@ summarize(Majority_Disadvantaged=if_else(Subgroup=="Economic Disadvantaged"&Perc
 How are the school districts represented in our delinquent dataset?
 
 ```{r}
-Cuyahoga_Delinquents_by_School_District <- Cuyahoga_Delinquents2018_2019 %>% group_by(School_District) %>% summarize(Total=n())
-datatable(Cuyahoga_Delinquents_by_School_District)
+#Cuyahoga_Delinquents_by_School_District <- Cuyahoga_Delinquents %>% group_by(School_District) %>% summarize(Total=n())
+#datatable(Cuyahoga_Delinquents_by_School_District)
 
 ```
 
@@ -957,7 +957,7 @@ Where are the properties that went from a land bank TO a person within the past 
 Land_Bank_Recipients_Without_interlandbank_transfers <- st_as_sf(Land_Bank_Recipients_Without_interlandbank_transfers)
 
 Cuyahoga_Land_Bank_Recipient_Properties_plotted2021 <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
-  filter(year(Transfer_date.x)==2021) %>% 
+  filter(year(Transfer_date)==2021) %>% 
   leaflet() %>% 
   addTiles() %>% 
   setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
@@ -972,7 +972,7 @@ How does that compare to properties the Land Bank is holding onto?
 ```{r}
 
 Land_Bank_Recipients_Without_interlandbank_transfers_20_and_21 <- Land_Bank_Recipients_Without_interlandbank_transfers %>% 
-  filter(year(Transfer_date.x)>2019)
+  filter(year(Transfer_date)>2019)
 
 
 Cuyahoga_Land_Bank_Recipient_Properties_versus_ones_they_held_onto <- Cuyahoga_geo %>% 
@@ -994,15 +994,15 @@ Where are the expensive properties in Cuyahoga county?
 What are the values of Cuyahoga parcels?
 
 ```{r}
-ggplot(Cuyahoga_geo)+
-  aes(x=Gross_Certified_Total)+
-  geom_histogram(binwidth = 10000000)+
-  stat_bin(binwidth= 10000000, geom="text", aes(label=..count..), vjust = -1) + 
-scale_x_continuous(breaks = seq(0 , 702599700, 10000000) , labels = comma)+
-theme(axis.text.x = element_text(angle = 45, vjust = 1.2, hjust = 1.1))
-  geom_text(data=Cuyahoga_geo, mapping=aes(x=Gross_Certified_Total),label=Gross_Certified_Total)
+#ggplot(Cuyahoga_geo)+
+  #aes(x=Gross_Certified_Total)+
+  #geom_histogram(binwidth = 10000000)+
+  #stat_bin(binwidth= 10000000, geom="text", aes(label=..count..), vjust = -1) + 
+#scale_x_continuous(breaks = seq(0 , 702599700, 10000000) , labels = comma)+
+#theme(axis.text.x = element_text(angle = 45, vjust = 1.2, hjust = 1.1))
+  #geom_text(data=Cuyahoga_geo, mapping=aes(x=Gross_Certified_Total),label=Gross_Certified_Total)
 
-hist(Cuyahoga_geo$Gross_Certified_Total, xlim=range(1000000),labels = TRUE)
+#hist(Cuyahoga_geo$Gross_Certified_Total, xlim=range(1000000),labels = TRUE)
 ```
 
 
@@ -1028,8 +1028,8 @@ Cuyahoga_Delinquents_Geo$geometry <- Cuyahoga_geo$geometry[match(Cuyahoga_Delinq
 Cuyahoga_Delinquents_Geo <- Cuyahoga_Delinquents_Geo %>% 
 filter(CLASSIFICATION_ID<6000|CLASSIFICATION_ID>6999|is.na(CLASSIFICATION_ID)) 
 
-raster::crs(Cuyahoga_Delinquents_Geo) <- "EPSG:4326" 
-shape_proj<-st_transform(Cuyahoga_Delinquents_Geo, CRS("+proj=gnom +lat_0=90 +lon_0=-50"))
+#raster::crs(Cuyahoga_Delinquents_Geo) <- "EPSG:4326" 
+#shape_proj<-st_transform(Cuyahoga_Delinquents_Geo, CRS("+proj=gnom +lat_0=90 +lon_0=-50"))
 
 
 ```
@@ -1040,17 +1040,19 @@ library(lwgeom)
 
 sf::sf_use_s2(FALSE)
 
-Cuyahoga_Distance_Matrix <- as.data.frame(st_distance(Cuyahoga_Delinquents_Geo$geometry,Cuyahoga_geo_millions$geometry)) #This takes quite a while just FYI
+#Cuyahoga_Distance_Matrix <- as.data.frame(st_distance(Cuyahoga_Delinquents_Geo$geometry,Cuyahoga_geo_millions$geometry)) #This takes quite a while just FYI
+#the above line of code is how you would actually do this, but since it take like three days and makes a file that's 10.5 gigs, for the html knit we're just going to pull in the file we alread made here
 
-
-%>% 
+Cuyahoga_Distance_Matrix <- rio::import("Cuyahoga_Distance_Matrix.csv")
+Cuyahoga_Distance_Matrix1 <- rio::import("Cuyahoga_Distance_Matrix1.csv")
+#%>% 
   #Sets column names
   
-Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix %>% 
-  `colnames<-`(Cuyahoga_geo_millions$parcel_id) %>% 
+#Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix %>% 
+  #`colnames<-`(Cuyahoga_geo_millions$parcel_id) %>% 
   
   #Adds a column containing names so that each row now also has a name
-  cbind(name =Cuyahoga_Delinquents_Geo$PROPERTY_NUMBER ) 
+  #cbind(name =Cuyahoga_Delinquents_Geo$PROPERTY_NUMBER ) 
 #Cuyahoga_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Cuyahoga Distance Matrix as well.
 
 ```
@@ -1068,11 +1070,11 @@ And therefore st_distance(Cuyahoga_Delinquents_Geo$geometry[[74]],Cuyahoga_geo_m
 However, that only means 4,685,008 of 601,285,648 distances couldn't be computed, or 0.007791651, less than 1%. So we are going to exclude them from our calculations, but wanted to note that. 
 
 ```{r}
-Cuyahoga_Distance_Matrix <- Cuyahoga_Distance_Matrix %>% 
-  filter(!is.na(V1))
+#Cuyahoga_Distance_Matrix <- Cuyahoga_Distance_Matrix %>% 
+  #filter(!is.na(V1))
 
-Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix1 %>% 
-  filter(!is.na(`12123003`))
+#Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix1 %>% 
+  #filter(!is.na(`12123003`))
 
 ```
 
@@ -1102,58 +1104,6 @@ Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>%
   mutate(parcel_id=(sub("-","",parcel_id,fixed = TRUE)))
 ```
 
-And change the 
-
-
-Then writing a function to find the sum, in meters, of the property to all other valuable properties.  
-
-```{r}
-Cuyahoga_Distance_Matrix_Totals <- Cuyahoga_Distance_Matrix %>% 
- janitor::adorn_totals(where= "row", na.rm = TRUE, name="Total_Distance")
-
-```
-
-
-Doing this the other way, as this is causing a lot of issues to transpose it: 
-
-```{r}
-library(lwgeom)
-
-sf::sf_use_s2(FALSE)
-
-Cuyahoga_Distance_Matrix <- as.data.frame(st_distance(Cuyahoga_geo_millions$geometry,Cuyahoga_Delinquents_Geo$geometry)) #This takes quite a while just FYI, like several days
-```
-
-Making a similar matrix with the column names added, so we don't get confused: 
-
-```{r}
-#Sets column names
-  
-Cuyahoga_Distance_Matrix1 <- Cuyahoga_Distance_Matrix %>% 
-  `colnames<-`(Cuyahoga_Delinquents_Geo$PROPERTY_NUMBER) %>% 
-  
-  #Adds a column containing names so that each row now also has a name
-  #cbind(name = Cuyahoga_geo_millions$parcel_id) 
-#Cuyahoga_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Cuyahoga Distance Matrix as well.
-```
-
-
-
-Let's find the total distance away: 
-
-```{r}
-Cuyahoga_Distance_Matrix_Totals <- Cuyahoga_Distance_Matrix1 %>% 
-  select(-name) %>% 
- janitor::adorn_totals(where= "col", na.rm = TRUE)
-
-
-```
-
-```{r}
-
-Cuyahoga_Distance_Matrix_Totals <- Cuyahoga_Distance_Matrix_Totals %>% 
-  slice(96237)
-```
 
 Dropping the meters units. Very cool that this is in meters but as we don't need to convert anything it's just making things more complicated.
 ```{r}
@@ -1162,12 +1112,6 @@ Cuyahoga_Distance_Matrix_No_Units <- drop_units(Cuyahoga_Distance_Matrix1)
 
 ```
 Finding the distance to all high-value parcels in the county. You can also do this with janitor's adorn_totals but we want to do a few Similar things so this is easier. 
-
-```{r}
-Total_Distance_To_High_Value_Parcels <- Cuyahoga_Distance_Matrix_No_Units %>%                                                       
-  dplyr::summarise_all(~sum(., na.rm = TRUE))
-```
-
 
 
 Finding the number of high-value parcels within 500 meters of the delinquent properties. (Approximately the distance between Al Jenkins' property and the hospital.) 
@@ -1196,22 +1140,11 @@ Cuyahoga_Distance_Info2 <-Number_Semi_Near %>%
   pivot_longer("001-02-033":"215-17-001", names_to = "PROPERTY_NUMBER", values_to = "number_of_high_value_properties_within_1000m" )
 ```
 
-```{r}
-Cuyahoga_Distance_Matrix_Totals <- drop_units(Cuyahoga_Distance_Matrix_Totals)
-
-Cuyahoga_Distance_Info3 <-Cuyahoga_Distance_Matrix_Totals %>% 
-  select(-Total) %>% 
-  slice_tail(n=1) %>% 
-  pivot_longer("001-02-033":"215-17-001", names_to = "PROPERTY_NUMBER", values_to = "Sum_of_distance_to_high_value_properties" )
-```
-
-
-Adding them together
 
 ```{r}
 Cuyahoga_Delinquents_With_Distance_Info <- left_join(Cuyahoga_Delinquents, Cuyahoga_Distance_Info1,  by="PROPERTY_NUMBER")
 Cuyahoga_Delinquents_With_Distance_Info <- left_join(Cuyahoga_Delinquents_With_Distance_Info, Cuyahoga_Distance_Info2,  by="PROPERTY_NUMBER")
-Cuyahoga_Delinquents_With_Distance_Info <- left_join(Cuyahoga_Delinquents_With_Distance_Info, Cuyahoga_Distance_Info3,  by="PROPERTY_NUMBER")
+
 ```
 
 
@@ -1272,7 +1205,7 @@ summary(Single_Fam_Dwelling_Owed$owed_as_percentage_of_lot_value)
 Next, we are going to take out the properties that are no longer in the map database. It looks like these properties are now listed with other properties. 
 
 ```{r}
-Cuyahoga_Delinquents_With_Distance_Info_Geo <- filter(Cuyahoga_Delinquents_With_Distance_Info, !is.na(Sum_of_distance_to_high_value_properties))
+Cuyahoga_Delinquents_With_Distance_Info_Geo <- filter(Cuyahoga_Delinquents_With_Distance_Info, !is.na(number_of_high_value_properties_within_500m))
 ```
 
 What's the rough distribution?
@@ -1752,7 +1685,7 @@ stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
   #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
-    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, GRAND_TOTAL_BALANCE, -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE, -number_of_high_value_properties_within_1000m, -Certified_Total_Value, -is_school_district_majority_disadvantaged, is_school_district_majority_white, number_of_high_value_properties_within_500m, -number_of_high_value_properties_within_1000m, -Close_to_high_value_properties
+    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, GRAND_TOTAL_BALANCE, -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE, -number_of_high_value_properties_within_1000m, -Certified_Total_Value, -is_school_district_majority_disadvantaged, is_school_district_majority_white, number_of_high_value_properties_within_500m, -number_of_high_value_properties_within_1000m, 
            )
 
 #stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
@@ -3211,9 +3144,9 @@ Montgomery parcels
 ```{r}
 Montgomery_data %>% filter(Gov_Foreclosure==1) %>% nrow()
 
-Montgomery_data %>% arrange(desc(owed_as_a_percentage_of_lot_value)) %>% top_n(278) %>% summarize(sum(Gov_Foreclosure))
+Montgomery_data %>%  top_n(278, owed_as_a_percentage_of_lot_value) %>% summarize(sum(Gov_Foreclosure))
 
-Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% summarize(sum(Gov_Foreclosure))
+Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(sum(Gov_Foreclosure))
 
 ```
 
@@ -3223,13 +3156,13 @@ How much did land bank parcels owe?
 Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(NETDELQ))
 Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(NETDELQ))
 
-Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% summarize(mean(NETDELQ))
-Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% summarize(median(NETDELQ))
+Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(mean(NETDELQ))
+Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(median(NETDELQ))
 ```
 
 How many were still delinquent three years later?
 ```{r}
-Montgomery_Worst_Offenders <- Montgomery_data %>% arrange(desc(NETDELQ)) %>% top_n(278) %>% filter(`Parcel Number` %in% Montgomery_Delinquents_to_2021$`PARCELID      `) 
+Montgomery_Worst_Offenders <- Montgomery_data %>% top_n(278, NETDELQ) %>% filter(`Parcel Number` %in% Montgomery_Delinquents_to_2021$`PARCELID      `) 
 
-datatable(Montgomery_Worst_Offenders)
+nrow(Montgomery_Worst_Offenders)/278
 ```

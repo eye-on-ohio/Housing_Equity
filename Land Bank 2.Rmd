@@ -62,9 +62,9 @@ Franklin_Transfers_To_Col <- rbind(Franklin2018, Franklin2019, Franklin2020, Fra
 Franklin_Transfers_To_Col <- Franklin_Transfers_To_Col %>% 
   distinct(TaxId, .keep_all = TRUE)
 
-rm(Franklin2018, Franklin2019, Franklin2020, Franklin2021)
+#rm(Franklin2018, Franklin2019, Franklin2020, Franklin2021)
 
-Franklin_Transfers_To_Col <- as.Date(Franklin_LB$Transfers_To_Col)
+Franklin_Transfers_To_Col <- as.Date(Franklin_Transfers_To_Col$Transfers_To_Col)
 
 #Got this through a FOIA
 
@@ -92,11 +92,6 @@ ggplot(Franklin_LB, aes(x=`Acquisition Method`, fill=`Property Class`))+
   theme(axis.text.x = element_text(angle = 45, vjust = .9, hjust = .9))
 ```
 
-When did they get acquired?
-
-```{r}
-
-```
 
 
 And now finding delinquents. Available from Franklin County's [website.](https://franklincountyauditor.com/ftp)
@@ -529,15 +524,15 @@ stack_overflow <- as.data.frame(Franklin_data)
 stack_overflow <- stack_overflow %>% 
     mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
     mutate_if(is.character, factor) #%>% 
-   #mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
+   #mutate(Within_mile = factor(Within_mile, levels = c(1,0)))
 
 
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
     select(Gov_Foreclosure,
-      #Amount_Owed, 
-      owed_as_a_percentage_of_lot_value,                                                        
-      #"is_school_district_majority_white",
+      Amount_Owed, 
+      #owed_as_a_percentage_of_lot_value,                                                        
+      "is_school_district_majority_white",
           #"is_school_district_majority_disadvantaged",
            #"number_of_high_value_properties_within_half_mile",
       #"number_of_high_value_properties_within_mile",   
@@ -940,36 +935,41 @@ Hamilton_School_Data <- st_join(Hamilton_School_Data, Hamilton_Schools_Geo, join
   
 ```
 
-```{r}
-Hamilton_School_Data %>% group_by(AUDPTYID) %>%  count(NAME.y) 
 
+Five of these have multiple answers. 
+
+PROPTYID       
+00960002026600 - Auditor's files says CINCINNATI CSD  
+01750018004700 - Cincy CSD  
+05000214027100    FOREST HILLS LSD 
+05000214027900   FOREST HILLS LSD 
+05500323045100     OAK HILLS LSD
+
+```{r}
+#Hamilton_data <- Hamilton_data %>% 
+  #filter(!PROPTYID=="00960002026600" & Hamilton_data$School_Dest_Standardized !="Cincinnati Public Schools - 043752 (Hamilton)") %>% 
+  #filter(!PROPTYID=="01750018004700" & School_Dest_Standardized !="Cincinnati Public Schools - 043752 (Hamilton)") %>% 
+  #filter(!PROPTYID=="05000214027100" & School_Dest_Standardized !="Forest Hills Local - 047340 (Hamilton)") %>% 
+  #filter(!PROPTYID=="05000214027900" & School_Dest_Standardized !="Forest Hills Local - 047340 (Hamilton)") %>% 
+  #filter(!PROPTYID=="05500323045100" & School_Dest_Standardized !="Oak Hills Local - 047373 (Hamilton)" ) 
 ```
 
 
-
-
-
-
-
-
-Because we had to geolocate the parcels within the school districts, this wipes our previous data, so adding it back in now. 
-
 ```{r}
-Hamilton_data <- Hamilton_data  %>% 
-  mutate(Gov_Foreclosure=if_else(AUDPTYID %in% Hamilton_LB$PARCELID, 1,0))
+Hamilton_School_Data <- Hamilton_School_Data %>% 
+  filter(!AUDPTYID=="00960002026600") %>% 
+  filter(!AUDPTYID=="01750018004700") %>% 
+  filter(!AUDPTYID=="05000214027100") %>% 
+  filter(!AUDPTYID=="05000214027900") %>% 
+  filter(!AUDPTYID=="05500323045100") 
 ```
 
-
-How many and what percent went to the Land Bank?
+Adding the school district
 
 ```{r}
-sum(Hamilton_data$Gov_Foreclosure)
-
-nrow(Hamilton_data)
-
-sum(Hamilton_data$Gov_Foreclosure)/(nrow(Hamilton_data))
-
+Hamilton_data$School_District <- Hamilton_School_Data$NAME.y[match(Hamilton_data$property_number,Hamilton_School_Data$AUDPTYID)]
 ```
+
 
 Note: so this means 4 properties were not in a school district. 
 
@@ -1093,7 +1093,6 @@ The names of school districts is the same but listed a bit differently in both d
 
 ```{r}
 Hamilton_data <- Hamilton_data %>% 
-  rename(School_District=NAME.y) %>% 
   mutate(School_Dest_Standardized= case_when(
      School_District== "CINCINNATI PUBLIC SCHOOLS" ~"Cincinnati Public Schools - 043752 (Hamilton)" ,
       School_District== "FOREST HILLS LOCAL SCOOLS" ~ "Forest Hills Local - 047340 (Hamilton)"  , #TYPO IN ORIGINAL
@@ -1136,33 +1135,6 @@ Hamilton_data$is_school_district_majority_disadvantaged <- Hamilton_schools_with
 ```
 
 
-Five of these have multiple answers. 
-
-PROPTYID       
-00960002026600 - Auditor's files says CINCINNATI CSD  
-01750018004700 - Cincy CSD  
-05000214027100    FOREST HILLS LSD 
-05000214027900   FOREST HILLS LSD 
-05500323045100     OAK HILLS LSD
-
-```{r}
-#Hamilton_data <- Hamilton_data %>% 
-  #filter(!PROPTYID=="00960002026600" & Hamilton_data$School_Dest_Standardized !="Cincinnati Public Schools - 043752 (Hamilton)") %>% 
-  #filter(!PROPTYID=="01750018004700" & School_Dest_Standardized !="Cincinnati Public Schools - 043752 (Hamilton)") %>% 
-  #filter(!PROPTYID=="05000214027100" & School_Dest_Standardized !="Forest Hills Local - 047340 (Hamilton)") %>% 
-  #filter(!PROPTYID=="05000214027900" & School_Dest_Standardized !="Forest Hills Local - 047340 (Hamilton)") %>% 
-  #filter(!PROPTYID=="05500323045100" & School_Dest_Standardized !="Oak Hills Local - 047373 (Hamilton)" ) 
-```
-
-
-```{r}
-Hamilton_data <- Hamilton_data %>% 
-  filter(!PROPTYID=="00960002026600") %>% 
-  filter(!PROPTYID=="01750018004700") %>% 
-  filter(!PROPTYID=="05000214027100") %>% 
-  filter(!PROPTYID=="05000214027900") %>% 
-  filter(!PROPTYID=="05500323045100") 
-```
 
 
 
@@ -1176,6 +1148,8 @@ Where are the high-value properties?
 
 Hamilton_Geo_Millions <- filter(Hamilton_Geo, MKT_TOTAL_>10000000)
 
+
+Hamilton_data$geometry <- Hamilton_Geo$geometry[match(Hamilton_data$property_number,Hamilton_Geo$AUDPTYID)]
 ```
 
 
@@ -1193,11 +1167,11 @@ Hamilton_Distance_Matrix <- as.data.frame(st_distance(  Hamilton_Geo_Millions$ge
   #Sets column names
   
 Hamilton_Distance_Matrix1 <- Hamilton_Distance_Matrix %>% 
-  `colnames<-`(Hamilton_data$PROPTYID ) %>% 
+  `colnames<-`(paste0("C",Hamilton_data$property_number )) %>% #You can't start a column with a straight number, so this is messing us up
   
   #Adds a column containing names so that each row now also has a name
-  cbind(name = Hamilton_Geo_Millions$PROPTYID  ) 
-#Hamilton_Distance_Matrix1 is the same as Cuyahoga_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Hamilton Distance Matrix as well.
+  cbind(name = Hamilton_Geo_Millions$AUDPTYID  ) 
+#Hamilton_Distance_Matrix1 is the same as Hamilton_Distance_Matrix but with the parcel number down the side  and column names on top so we don't get confused. But obviously that is just a label and not actually part of the calculations (aka a bad data practice) which is why we keep Hamilton Distance Matrix as well.
 
 ```
 
@@ -1210,6 +1184,7 @@ Removing the units
 ```{r}
 library(units)
 Hamilton_Distance_Matrix_No_Units <- drop_units(Hamilton_Distance_Matrix1)
+
 ```
 
 
@@ -1230,21 +1205,30 @@ Hamilton_Number_Semi_Near <- Hamilton_Distance_Matrix_No_Units %>%
 ```{r}
 Hamilton_Distance_Info1 <-Hamilton_Number_Near %>% 
   select(-name) %>% 
-  pivot_longer("06510026000700":"05100031051600", names_to = "PARCELID", values_to = "number_of_high_value_properties_within_half_mile" )
+  pivot_longer("C0550004001200":"C5900222059300", names_to = "property_number", values_to = "number_of_high_value_properties_within_half_mile" )
 ```
 
 ```{r}
 Hamilton_Distance_Info2 <-Hamilton_Number_Semi_Near %>% 
   select(-name) %>% 
-  pivot_longer("06510026000700":"05100031051600", names_to = "PARCELID", values_to = "number_of_high_value_properties_within_mile" )
+  pivot_longer("C0550004001200":"C5900222059300", names_to = "property_number", values_to = "number_of_high_value_properties_within_mile" )
 ```
+To fix the property names
 
+```{r}
+Hamilton_Distance_Info1 <-  Hamilton_Distance_Info1 %>% 
+  mutate(property_number=substr(property_number,2,14))
+         
+         Hamilton_Distance_Info2 <-  Hamilton_Distance_Info2 %>% 
+  mutate(property_number=substr(property_number,2,14))
+```
 
 Adding them together
 
 ```{r}
-Hamilton_data <- left_join(Hamilton_data, Hamilton_Distance_Info1, by="PARCELID")
-Hamilton_data <- left_join(Hamilton_data, Hamilton_Distance_Info2, by="PARCELID")
+Hamilton_data$number_of_high_value_properties_within_half_mile <- Hamilton_Distance_Info1$number_of_high_value_properties_within_half_mile[match(Hamilton_data$property_number, Hamilton_Distance_Info1$property_number)]
+
+Hamilton_data$number_of_high_value_properties_within_mile <- Hamilton_Distance_Info2$number_of_high_value_properties_within_mile[match(Hamilton_data$property_number, Hamilton_Distance_Info2$property_number)]
 ```
 
 Which properties were just near expensive properties, period?
@@ -1255,34 +1239,16 @@ Hamilton_data  <- Hamilton_data %>%
 ```
 
 
-Adding in the amount of delinquency. Remember the properties that didn't pay in 2017 (Certified delinquent in 2018) don't have an assessed value for that year. 
 
+
+
+Note: some properties are listed with a value of 0. Including a bunch of properties that went to the land bank so this isn't very helpful.
 ```{r}
-Hamilton_data$delinquent_amount <- Hamilton_Delinquent$`delinquent amount`[match(Hamilton_data$AUDPTYID, Hamilton_Delinquent$property_number)]
-
+Hamilton_data$Property_Value <- Hamilton_Geo$MKT_TOTAL_[match(Hamilton_data$property_number, Hamilton_Geo$AUDPTYID)] #Note this is 2021 value
+Hamilton_data<- mutate(Hamilton_data, owed_as_a_percentage_of_lot_value=`delinquent amount`/Property_Value)
 ```
 
-```{r}
-summary(Hamilton_data$delinquent_amount)
-```
 
-
-```{r}
-#Hamilton_data <- Hamilton_data %>% 
-  #filter(NETDELQ>0)
-```
-
-Note: some properties are listed with a value of 0. 
-```{r}
-#Hamilton_data <- Hamilton_data %>% 
-  #filter(ASMTTOTAL>0)
-```
-
-Converting percent owed
-```{r}
-#Hamilton_data <- Hamilton_data %>% 
-  #mutate(owed_as_a_percentage_of_lot_value=NETDELQ/ASMTTOTAL)
-```
 
 And now for the machine learning part
 
@@ -1294,17 +1260,20 @@ stack_overflow <- as.data.frame(Hamilton_data)
 
 stack_overflow <- stack_overflow %>% 
     mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
-    mutate_if(is.character, factor) #%>% filter(delinquent_amount>1023)
-   #mutate(Within_mile = factor(Within_half_mile, levels = c(1,0)))
+    mutate_if(is.character, factor) %>% 
+  filter(!Property_Value==0) #113 but none are land banks
+#%>% 
+   #mutate(Within_half_mile = factor(Within_half_mile, levels = c(1,0)))
 
 
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
-    select("Gov_Foreclosure", delinquent_amount,
-      #owed_as_a_percentage_of_lot_value,                                                        
-      #"is_school_district_majority_white",
+    select("Gov_Foreclosure", 
+           #`delinquent amount`,
+      owed_as_a_percentage_of_lot_value,                                                        
+      "is_school_district_majority_white",
           #"is_school_district_majority_disadvantaged",
-           #"number_of_high_value_properties_within_half_mile", #not stastically significant 
+          # "number_of_high_value_properties_within_half_mile", #not stastically significant 
      # "number_of_high_value_properties_within_mile",   
            #"Within_half_mile",   
            #"Within_mile"       
@@ -1452,25 +1421,29 @@ Hamilton parcels
 ```{r}
 Hamilton_data %>% filter(Gov_Foreclosure==1) %>% nrow()
 
-as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% summarize(sum(Gov_Foreclosure))
+Hamilton_data %>%  top_n(103, `delinquent amount`) %>% summarize(sum(Gov_Foreclosure))
 
 ```
 
 How much did land bank parcels owe?
 
 ```{r}
-as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(delinquent_amount))
-as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==1) %>% summarize(median(delinquent_amount))
+as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(`delinquent amount`))
+as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==1) %>% summarize(median(`delinquent amount`))
 
-as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% summarize(mean(delinquent_amount))
-as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% summarize(median(delinquent_amount))
+as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(`delinquent amount`, na.rm=TRUE))
+as.data.frame(Hamilton_data) %>% filter(Gov_Foreclosure==0) %>% summarize(median(`delinquent amount`, na.rm=TRUE))
+
+as.data.frame(Hamilton_data) %>% top_n(99, `delinquent amount`) %>% summarize(mean(`delinquent amount`))
+as.data.frame(Hamilton_data)  %>% top_n(99, `delinquent amount`) %>% summarize(median(`delinquent amount`))
 ```
 
 How many were still delinquent three years later?
 ```{r}
-Hamilton_Worst_Offenders <- as.data.frame(Hamilton_data) %>% arrange(desc(delinquent_amount)) %>% top_n(99) %>% filter(AUDPTYID %in% Hamilton_Delinquent$property_number) 
+Hamilton_Worst_Offenders <- Hamilton_Delinquent %>% filter(year==2017) %>%  top_n(99, `delinquent amount`)
 
-datatable(Hamilton_Worst_Offenders)
+Hamilton_Still_There <- Hamilton_Delinquent %>% filter(year==2020) %>%  filter(property_number %in% Hamilton_Worst_Offenders$property_number)
+
 ```
 
 ### Athens County

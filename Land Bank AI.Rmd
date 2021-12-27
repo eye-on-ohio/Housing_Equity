@@ -337,8 +337,8 @@ Adding the geocoded parcels to the map:
 Cuyahoga_Properties_plotted_all <- leaflet(data = Cuyahoga_data_with_map) %>% 
   addTiles() %>% 
   setView(-81.66754692563244,41.43053368069701, zoom = 10) %>% 
-  addPolygons() %>% 
-  addMarkers(lat = Cuyahoga_demolished_with_Addresses_and_Geocoded$lat, lng = Cuyahoga_demolished_with_Addresses_and_Geocoded$lon, popup = "address")
+  addPolygons(popup =paste("Parcel ID:",Cuyahoga_data_with_map$PARCEL_ID)) %>% 
+  addMarkers(lat = Cuyahoga_demolished_with_Addresses_and_Geocoded$lat, lng = Cuyahoga_demolished_with_Addresses_and_Geocoded$lon, popup = Cuyahoga_demolished_with_Addresses_and_Geocoded$address)
   
 Cuyahoga_Properties_plotted_all
 ```
@@ -401,14 +401,9 @@ Cuyahoga_Delinquent_2020 <- list_of_files %>%
 
 
 Cuyahoga_Delinquent_2020 <- Cuyahoga_Delinquent_2020 %>% filter(SCHOOL_DESCR!="Delinquent is defined as having a balance greater than $0.00 and no payment plan  after 2nd half collection closed.CUYAHOGA COUNTY ASSUMES NO LIABILITY FOR DAMAGES AS A RESULT OF ERRORS, OMISSIONS OR DISCREPANCIES CONTAINED IN THESE PAGES. PROSPECTIVE PURCHASERS SHOULD CONSULT A REAL ESTATE ATTORNEY AND PURCHASE A TITLE INSURANCE POLICY PRIOR TO THE SALE.") %>% filter(!is.na(SCHOOL_DESCR))
-```
 
+#Adding those together
 
-
-
-Adding those together
-
-```{r}
 Cuyahoga_Delinquent_2018 <- Cuyahoga_Delinquent_2018 %>% 
   rename(SCHOOL_DESCR=SCHOOL_DIST_NAME) %>% 
   select(PROPERTY_NUMBER,SCHOOL_DESCR,PRIMARY_OWNER_NAME,TAX_YEAR,CLASSIFICATION_ID,CLASSIFICATION_DESCR, GRAND_TOTAL_OWED, GRAND_TOTAL_PAID, GRAND_TOTAL_BALANCE,UPDATE_DATE)
@@ -432,7 +427,7 @@ Some properties might be delinquent both years.
 So we need to keep only the distinct ones
 
 ```{r}
-Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>%  distinct(PROPERTY_NUMBER, .keep_all = TRUE)
+Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>%  arrange(desc(GRAND_TOTAL_OWED)) %>% distinct(PROPERTY_NUMBER, .keep_all = TRUE)
 ```
 
 
@@ -455,7 +450,8 @@ note: properties in the 700-0s are exempt because they are in the land bank esse
 Cuyahoga_Delinquents$CLASSIFICATION_ID <- as.double(Cuyahoga_Delinquents$CLASSIFICATION_ID)
 
 Cuyahoga_Delinquents <- Cuyahoga_Delinquents %>% 
-  filter(CLASSIFICATION_ID<6000|CLASSIFICATION_ID>6999|is.na(CLASSIFICATION_ID))
+  filter(CLASSIFICATION_ID<6000|CLASSIFICATION_ID>6999|is.na(CLASSIFICATION_ID)) %>% 
+  filter(PROPERTY_NUMBER!="543-39-072") #Looks like this onw was improperly tagged as residential taxable property and not  parkland
 ```
 
 
@@ -520,7 +516,7 @@ Cuyahoga_Delinquents <-  Cuyahoga_Delinquents %>%
   mutate(owed_as_percentage_of_lot_value=GRAND_TOTAL_BALANCE/Certified_Total_Value)
 ```
 
-Note: 68 properties are listed as having a value of 0. This is on the website too, and there doesn't seem to be a clear pattern. We are adding this to our list to ask the fiscal officer. 
+Note: 68 properties are listed as having a value of 0. This is on the website too, and there doesn't seem to be a clear pattern. Looks like these parcels were Incorporated into others. 
 
 ```{r}
 Cuyahoga_Delinquents_with_0_value <- Cuyahoga_Delinquents %>% select(PROPERTY_NUMBER,Certified_Total_Value) %>% filter(Certified_Total_Value==0)
@@ -531,14 +527,14 @@ Cuyahoga_Delinquents <-  Cuyahoga_Delinquents %>% filter(Certified_Total_Value!=
 
 
 
-So 2,362 properties went to the government, but that's only 2% of the properties. (And some ostensibly people paid their back taxes!) 
+So lots of properties went to the government, but that's very few of the tax-delinquent. (And some ostensibly people paid their back taxes!) 
 
 Next: we need to bring in the categories of each school district. 
 
 This is from the Ohio Department of Education. [There's no direct download link, you have to choose what you want.]
 )
 
-They don't allow you to download all the info at once by district, or if they do we couldn't figure it out. But anyway, this takes every school in Cuyahoga. (So we searched for "Cuyahoga," clicked on the button next to each one, then downloaded.) 
+They don't allow you to download all the info at once by district, or if they do we couldn't figure it out. But anyway, this takes every school in Cuyahoga. (So we searched for "Cuyahoga," clicked on the button next to each one, then downloaded.) Note: subsequent counties use a file that has this altogether then filters it in R. This is limited to 2021 school numbers. 
 
 
 ```{r}
@@ -890,19 +886,6 @@ ppv(results, truth = Land_Bank, estimate = .pred_glm)
 ppv(results, truth = Land_Bank, estimate = .pred_tree)
 ```
 
-Which variables are particularly important? 
-
-```{r}
-data <- Cuyahoga_Delinquents %>%
-    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_DESCR, -School_Dest_Standardized)
-
-names(data)
-
-#writing a function to automate writing the formula: 
-n<-names(data)
-form1 = as.formula(paste("Land_Bank ~", paste(n[!n %in% "Land_Bank"], collapse = " + ")))
-```
-
 
 Let's see where properties are in relation to future developments. 
 
@@ -990,21 +973,6 @@ Cuyahoga_Land_Bank_Recipient_Properties_versus_ones_they_held_onto
 
 
 Where are the expensive properties in Cuyahoga county?
-
-What are the values of Cuyahoga parcels?
-
-```{r}
-#ggplot(Cuyahoga_geo)+
-  #aes(x=Gross_Certified_Total)+
-  #geom_histogram(binwidth = 10000000)+
-  #stat_bin(binwidth= 10000000, geom="text", aes(label=..count..), vjust = -1) + 
-#scale_x_continuous(breaks = seq(0 , 702599700, 10000000) , labels = comma)+
-#theme(axis.text.x = element_text(angle = 45, vjust = 1.2, hjust = 1.1))
-  #geom_text(data=Cuyahoga_geo, mapping=aes(x=Gross_Certified_Total),label=Gross_Certified_Total)
-
-#hist(Cuyahoga_geo$Gross_Certified_Total, xlim=range(1000000),labels = TRUE)
-```
-
 
 
 
@@ -1117,15 +1085,21 @@ Finding the distance to all high-value parcels in the county. You can also do th
 Finding the number of high-value parcels within 500 meters of the delinquent properties. (Approximately the distance between Al Jenkins' property and the hospital.) 
 
 ```{r}
-Number_Near <- Cuyahoga_Distance_Matrix_No_Units %>%                                                                                  
-  dplyr::summarise_all(~sum(.<500, na.rm = TRUE))
+Number_Near <- rio::import("Cuyahoga_Number_Near.csv")
+
+#So you would normally use this fuction, but as it takes a longggg time, we are going to, for review purposes just reload it in here. 
+
+#Number_Near <- Cuyahoga_Distance_Matrix_No_Units %>%                                                                                  
+  #dplyr::summarise_all(~sum(.<500, na.rm = TRUE))
 ```
 
 And for comparison, also the number twice as far. 
 
 ```{r}
-Number_Semi_Near <- Cuyahoga_Distance_Matrix_No_Units %>%                                                                           
-  dplyr::summarise_all(~sum(.<1000, na.rm = TRUE))
+Number_Semi_Near <- rio::import("Cuyahoga_Number_Near.csv")
+#So you would normally use this fuction, but as it takes a longggg time, we are going to, for review purposes just reload it in here. 
+#Number_Semi_Near <- Cuyahoga_Distance_Matrix_No_Units %>%                                                                           
+  #dplyr::summarise_all(~sum(.<1000, na.rm = TRUE))
 ```
 
 ```{r}
@@ -1282,7 +1256,7 @@ Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
   filter(GRAND_TOTAL_OWED<100000) %>% 
 ggplot(aes(x=GRAND_TOTAL_OWED))+
   geom_histogram()+
-  stat_bin(binwidth = 10000, geom="text",aes(label=..count..), position = position_stack(vjust = .5))
+  stat_bin(binwidth = 10000, geom="text",aes(label=..count..), position = position_stack(vjust = .9))
   
 ```
 
@@ -1304,7 +1278,8 @@ Okay step one: choosing an appropriate model. We want to predict here whether a 
 
 So first, we have very few Land bank properties versus delinquent properties overall. And this, of course, is our whole story. Who has the power to decide where this will happen? But we will have to take this into account and try to split our training and test sets with an equal number of land bank properties. 
 
-Next, we are going to split the dataset into training and testing models, evenly diving the sections between the Land Bank and non-land bank properties. 
+
+Next, we are going to split the dataset into training and testing models, evenly diving the sections between the Land Bank and non-land bank properties. Here you can rerun the code several times, being careful not to use two factors that are related to each other.
 
 ```{r}
 stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
@@ -1315,7 +1290,10 @@ stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
 
 # Create stack_select dataset
 stack_select <- stack_overflow %>%
-  select(Gov_Foreclosure, is_school_district_majority_white, number_of_high_value_properties_within_500m, owed_as_percentage_of_lot_value) 
+  select(Gov_Foreclosure, GRAND_TOTAL_OWED
+         #, owed_as_percentage_of_lot_value
+         ,is_school_district_majority_white, number_of_high_value_properties_within_500m 
+         ) 
     #select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties,  -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID,  -Certified_Total_Value,  -Close_to_high_value_properties, -number_of_high_value_properties_within_500m, owed_as_percentage_of_lot_value
            
 
@@ -1459,21 +1437,21 @@ datatable(tidy(stack_glm))
 How much do properties owe? 
 
 ```{r}
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED, na.rm=TRUE))
  
- Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED))
+ Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED, na.rm=TRUE))
   
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value, na.rm=TRUE))
 
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value, na.rm=TRUE))
 
-  Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(mean(owed_as_percentage_of_lot_value))
+  Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(mean(owed_as_percentage_of_lot_value, na.rm=TRUE))
   
-  Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(median(owed_as_percentage_of_lot_value))
+  Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(median(owed_as_percentage_of_lot_value, na.rm=TRUE))
  
    Cuyahoga_Delinquents_With_Distance_Info_Geo %>% count(Gov_Foreclosure)
 
- Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(mean(GRAND_TOTAL_OWED))
+ Cuyahoga_Delinquents_With_Distance_Info_Geo %>% summarize(mean(GRAND_TOTAL_OWED, na.rm=TRUE))
  
  
 Cuyahoga_Delinquents_With_Distance_Info %>%  #different because trailers don't have geographic info
@@ -1524,23 +1502,24 @@ In majority white school districts, there were 19,515 properties (19443+72). 0.0
 But that doesn't take into account how much those properties owed. 
 
 ```{r}
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(owed_as_percentage_of_lot_value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(owed_as_percentage_of_lot_value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(owed_as_percentage_of_lot_value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(owed_as_percentage_of_lot_value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(owed_as_percentage_of_lot_value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(owed_as_percentage_of_lot_value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(owed_as_percentage_of_lot_value, na.rm=TRUE))
 
 
 
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(Certified_Total_Value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(Certified_Total_Value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(Certified_Total_Value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(Certified_Total_Value))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(Certified_Total_Value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(Certified_Total_Value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(Certified_Total_Value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(Certified_Total_Value, na.rm=TRUE))
 
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(GRAND_TOTAL_OWED))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(GRAND_TOTAL_OWED))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(GRAND_TOTAL_OWED))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(mean(GRAND_TOTAL_OWED, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% summarize(median(GRAND_TOTAL_OWED, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(mean(GRAND_TOTAL_OWED, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% summarize(median(GRAND_TOTAL_OWED, na.rm=TRUE))
 ```
+
 In districts where the majority of students were white, delinquent owners owed an average of 6.6% of their lot value. The median was 1.5%. In minority districts, delinquent owners were behind on average for 64.7% of their lot value, with a median of 4.7%. 
 
 In terms of absolute numbers, delinquent proeprties in majority white districts were valued at an average $278,615, with a median of $154,900. In minority districts, the median was $37,500 and the average was $92,419.
@@ -1549,18 +1528,18 @@ Homes in white districts owed an average of $10,122 and a median of $5,041. In m
 
 
 ```{r}
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==1) %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED, na.rm=TRUE))
 
 
 
 
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED))
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(owed_as_percentage_of_lot_value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(owed_as_percentage_of_lot_value, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(GRAND_TOTAL_OWED, na.rm=TRUE))
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% filter(is_school_district_majority_white==0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(GRAND_TOTAL_OWED, na.rm=TRUE))
 ```
 Homes in majority white districts and in the land bank (or foreclosed upon by the government) owed an average of 130% of their lot value, with a median of 49.8% of their lot value. Or $22,974 average ($10,637 median.)
 
@@ -1587,7 +1566,7 @@ Let's look at properies around the mean. This is all properties:
 ```{r}
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
   filter(owed_as_percentage_of_lot_value>(mean(owed_as_percentage_of_lot_value))) %>% 
-  summarize(mean(number_of_high_value_properties_within_500m))
+  summarize(mean(number_of_high_value_properties_within_500m, na.rm=TRUE))
 ```
 
 Then properties that weren't foreclosed on
@@ -1596,7 +1575,7 @@ Then properties that weren't foreclosed on
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
   filter(owed_as_percentage_of_lot_value>(mean(owed_as_percentage_of_lot_value))) %>% 
   filter(Gov_Foreclosure==0) %>% 
-  summarize(mean(number_of_high_value_properties_within_500m))
+  summarize(mean(number_of_high_value_properties_within_500m, na.rm=TRUE))
 ```
 
 And properties that were: 
@@ -1604,16 +1583,16 @@ And properties that were:
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
   filter(owed_as_percentage_of_lot_value>(mean(owed_as_percentage_of_lot_value))) %>%  
   filter(Gov_Foreclosure==1) %>% 
-  summarize(mean(number_of_high_value_properties_within_500m))
+  summarize(mean(number_of_high_value_properties_within_500m, na.rm=TRUE))
 ```
 
 ```{r}
-summary(Cuyahoga_Delinquents_With_Distance_Info_Geo$GRAND_TOTAL_OWED)
+summary(Cuyahoga_Delinquents_With_Distance_Info_Geo$GRAND_TOTAL_OWED, na.rm=TRUE)
 ```
 What's the standard deviation?
 
 ```{r}
-sd(Cuyahoga_Delinquents_With_Distance_Info_Geo$GRAND_TOTAL_OWED)
+sd(Cuyahoga_Delinquents_With_Distance_Info_Geo$GRAND_TOTAL_OWED, na.rm=TRUE)
 ```
 Let's look at properies around the mean. This is all properties: 
 ```{r}
@@ -1628,7 +1607,7 @@ Then properties that weren't foreclosed on
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
   filter(GRAND_TOTAL_OWED>(mean(GRAND_TOTAL_OWED, na.rm=TRUE)-sd(GRAND_TOTAL_OWED)&GRAND_TOTAL_OWED<mean(GRAND_TOTAL_OWED, na.rm=TRUE)+sd(GRAND_TOTAL_OWED))) %>% 
   filter(Gov_Foreclosure==0) %>% 
-  summarize(mean(number_of_high_value_properties_within_500m))
+  summarize(mean(number_of_high_value_properties_within_500m, na.rm=TRUE))
 ```
 
 And properties that were: 
@@ -1636,7 +1615,7 @@ And properties that were:
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
   filter(GRAND_TOTAL_OWED>(mean(GRAND_TOTAL_OWED, na.rm=TRUE)-sd(GRAND_TOTAL_OWED)&GRAND_TOTAL_OWED<mean(GRAND_TOTAL_OWED, na.rm=TRUE)+sd(GRAND_TOTAL_OWED))) %>%   
   filter(Gov_Foreclosure==1) %>% 
-  summarize(mean(number_of_high_value_properties_within_500m))
+  summarize(mean(number_of_high_value_properties_within_500m, na.rm=TRUE))
 ```
 
 
@@ -1644,340 +1623,32 @@ Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
 
 ```{r}
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
-  summarize(mean(is_school_district_majority_white))
-
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
-  filter(Gov_Foreclosure==0) %>% 
-  summarize(mean(is_school_district_majority_white))
-
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
-  filter(Gov_Foreclosure==1) %>% 
-  summarize(mean(is_school_district_majority_white))
-```
-
-
-
-
-```{r}
-Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
-  summarize(mean(is_school_district_majority_disadvantaged))
+  summarize(mean(is_school_district_majority_white, na.rm=TRUE))
 
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
   filter(Gov_Foreclosure==0) %>% 
-  summarize(mean(is_school_district_majority_disadvantaged))
+  summarize(mean(is_school_district_majority_white, na.rm=TRUE))
 
 Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
   filter(Gov_Foreclosure==1) %>% 
-  summarize(mean(is_school_district_majority_disadvantaged))
-```
-
-###Looking at Race
-
-
-
-```{r}
-stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
-  filter(owed_as_percentage_of_lot_value>.51) %>% 
-    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
-    mutate_if(is.character, factor)
-
-
-# Create stack_select dataset
-stack_select <- stack_overflow %>%
-  #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
-    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, GRAND_TOTAL_BALANCE, -GRAND_TOTAL_OWED, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE, -number_of_high_value_properties_within_1000m, -Certified_Total_Value, -is_school_district_majority_disadvantaged, is_school_district_majority_white, number_of_high_value_properties_within_500m, -number_of_high_value_properties_within_1000m, 
-           )
-
-#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
-
-# Split the data into training and testing sets
-set.seed(1234)
-stack_split <- stack_select %>%
-    initial_split(prop = 0.8,
-                  strata = Gov_Foreclosure)
-
-stack_train <- training(stack_split)
-stack_test <- testing(stack_split)
-
-glimpse(stack_train)
-glimpse(stack_test)
-```
-
-Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
-
-
-Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
-
-
-```{r}
-stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
-    step_downsample(Gov_Foreclosure)
-
-stack_prep <- prep(stack_recipe)
-
-stack_down <- bake(stack_prep, new_data = NULL)
-
-stack_down %>%
-    count(Gov_Foreclosure)
-```
-
-Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
-
-First, we're going to build a logistical regression model
-
-```{r}
-stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
-    step_downsample(Gov_Foreclosure)
-
-glm_spec <- logistic_reg() %>%
-    set_engine("glm")
-
-## Start a workflow (recipe only)
-stack_wf <- workflow() %>%
-    add_recipe(stack_recipe)
-
-## Add the model and fit the workflow
-stack_glm <- stack_wf %>%
-    add_model(glm_spec) %>%
-    fit(data = stack_train)
-
-# Print the fitted model
-stack_glm
-```
-
-
-Next, we're going to build a decision tree model. 
-
-```{r}
-stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
-    step_downsample(Gov_Foreclosure)
-
-tree_spec <- decision_tree() %>%         
-    set_engine("rpart") %>%      
-    set_mode("classification") 
-
-## Start a workflow (recipe only)
-stack_wf <- workflow() %>%
-    add_recipe(stack_recipe)
-
-## Add the model and fit the workflow
-stack_tree <- stack_wf %>%
-    add_model(tree_spec) %>%
-    fit(data = stack_train)
-
-# Print the fitted model
-stack_tree
-```
-
-Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
-
-```{r}
-results <- stack_test %>%
-    bind_cols(predict(stack_glm, stack_test) %>%
-                  rename(.pred_glm = .pred_class))
-
-# Confusion matrix for logistic regression model
-results %>%
-    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
-```
-
-
-Confusion Maxtrix for decision tree model
-
-```{r}
-results <- stack_test %>%
-    bind_cols(predict(stack_tree, stack_test) %>%
-                  rename(.pred_tree = .pred_class))
-
-# Confusion matrix for decision tree model
-results %>%
-    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
-```
-
-Now let's calculate the accuracy of our results: 
-
-```{r}
-results <- stack_test %>%
-    bind_cols(predict(stack_glm, stack_test) %>%
-                  rename(.pred_glm = .pred_class)) %>%
-    bind_cols(predict(stack_tree, stack_test) %>%
-                  rename(.pred_tree = .pred_class))
-
-## Calculate accuracy
-accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
-accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
-
-## Calculate positive predict value
-ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
-ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
-```
-
-Which variables are particularly important? 
-
-
-```{r}
-vip_tree <- extract_fit_parsnip(stack_tree)$fit
-vip_tree$variable.importance
-```
-Looking at the importance in the logistic regression: 
-```{r}
-datatable(tidy(stack_glm))
-
+  summarize(mean(is_school_district_majority_white, na.rm=TRUE))
 ```
 
 
 
 
 ```{r}
-stack_overflow <- Cuyahoga_Delinquents_With_Distance_Info_Geo %>%
-    mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
-    mutate_if(is.character, factor)
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  summarize(mean(is_school_district_majority_disadvantaged, na.rm=TRUE))
 
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==0) %>% 
+  summarize(mean(is_school_district_majority_disadvantaged, na.rm=TRUE))
 
-# Create stack_select dataset
-stack_select <- stack_overflow %>%
-  #select(Gov_Foreclosure, owed_as_percentage_of_lot_value, number_of_high_value_properties_within_500m, number_of_high_value_properties_within_1000m, Sum_of_distance_to_high_value_properties) 
-    select(-PROPERTY_NUMBER, -SCHOOL_DESCR, -PRIMARY_OWNER_NAME, -TAX_YEAR,-UPDATE_DATE, -CLASSIFICATION_ID,-CLASSIFICATION_DESCR, -School_Dest_Standardized, -Land_Bank, -Sum_of_distance_to_high_value_properties, -GRAND_TOTAL_BALANCE, -GRAND_TOTAL_PAID, -GRAND_TOTAL_BALANCE,  -Certified_Total_Value, -is_school_district_majority_disadvantaged, -is_school_district_majority_white, -owed_as_percentage_of_lot_value, -number_of_high_value_properties_within_500m
-           )
-
-#stack_select$is_school_district_majority_white <- as.factor(stack_select$is_school_district_majority_white)
-
-# Split the data into training and testing sets
-set.seed(1234)
-stack_split <- stack_select %>%
-    initial_split(prop = 0.8,
-                  strata = Gov_Foreclosure)
-
-stack_train <- training(stack_split)
-stack_test <- testing(stack_split)
-
-glimpse(stack_train)
-glimpse(stack_test)
+Cuyahoga_Delinquents_With_Distance_Info_Geo %>% 
+  filter(Gov_Foreclosure==1) %>% 
+  summarize(mean(is_school_district_majority_disadvantaged, na.rm=TRUE))
 ```
-
-Now, we get to the class imbalance in our data set. We don't want our machine learning model to always predict the majority class. 
-
-
-Here, we're going to use downsampling, (AKA undersampling)- we randomly remove observations from the majority class until it's the same size as the minority class and both classes can have the same effect on the machine learning model we're training. 
-
-
-```{r}
-stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
-    step_downsample(Gov_Foreclosure)
-
-stack_prep <- prep(stack_recipe)
-
-stack_down <- bake(stack_prep, new_data = NULL)
-
-stack_down %>%
-    count(Gov_Foreclosure)
-```
-
-Note: we are *only* downsampling the training data, not the test data, because we want the test data to be like how this would happen in real life. 
-
-First, we're going to build a logistical regression model
-
-```{r}
-stack_recipe <- recipe(Gov_Foreclosure~ ., data = stack_train) %>% 
-    step_downsample(Gov_Foreclosure)
-
-glm_spec <- logistic_reg() %>%
-    set_engine("glm")
-
-## Start a workflow (recipe only)
-stack_wf <- workflow() %>%
-    add_recipe(stack_recipe)
-
-## Add the model and fit the workflow
-stack_glm <- stack_wf %>%
-    add_model(glm_spec) %>%
-    fit(data = stack_train)
-
-# Print the fitted model
-stack_glm
-```
-
-
-Next, we're going to build a decision tree model. 
-
-```{r}
-stack_recipe <- recipe(Gov_Foreclosure ~ ., data = stack_train) %>% 
-    step_downsample(Gov_Foreclosure)
-
-tree_spec <- decision_tree() %>%         
-    set_engine("rpart") %>%      
-    set_mode("classification") 
-
-## Start a workflow (recipe only)
-stack_wf <- workflow() %>%
-    add_recipe(stack_recipe)
-
-## Add the model and fit the workflow
-stack_tree <- stack_wf %>%
-    add_model(tree_spec) %>%
-    fit(data = stack_train)
-
-# Print the fitted model
-stack_tree
-```
-
-Now we're going to see how well our models performed.  A confusion matrix tabulates how many examples in each class were correctly classified by a model. 
-
-```{r}
-results <- stack_test %>%
-    bind_cols(predict(stack_glm, stack_test) %>%
-                  rename(.pred_glm = .pred_class))
-
-# Confusion matrix for logistic regression model
-results %>%
-    conf_mat(truth = Gov_Foreclosure, estimate = .pred_glm)
-```
-
-
-Confusion Maxtrix for decision tree model
-
-```{r}
-results <- stack_test %>%
-    bind_cols(predict(stack_tree, stack_test) %>%
-                  rename(.pred_tree = .pred_class))
-
-# Confusion matrix for decision tree model
-results %>%
-    conf_mat(truth = Gov_Foreclosure, estimate = .pred_tree)
-```
-
-Now let's calculate the accuracy of our results: 
-
-```{r}
-results <- stack_test %>%
-    bind_cols(predict(stack_glm, stack_test) %>%
-                  rename(.pred_glm = .pred_class)) %>%
-    bind_cols(predict(stack_tree, stack_test) %>%
-                  rename(.pred_tree = .pred_class))
-
-## Calculate accuracy
-accuracy(results, truth = Gov_Foreclosure, estimate = .pred_glm)
-accuracy(results, truth = Gov_Foreclosure, estimate = .pred_tree)
-
-## Calculate positive predict value
-ppv(results, truth = Gov_Foreclosure, estimate = .pred_glm)
-ppv(results, truth = Gov_Foreclosure, estimate = .pred_tree)
-```
-
-Which variables are particularly important? 
-
-
-```{r}
-vip_tree <- extract_fit_parsnip(stack_tree)$fit
-vip_tree$variable.importance
-```
-Looking at the importance in the logistic regression: 
-```{r}
-datatable(tidy(stack_glm))
-
-```
-
-
 
 
 
@@ -2450,43 +2121,43 @@ datatable(tidy(stack_glm))
 Comparing LB to non-LB parcels
 
 ```{r}
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(median(Delinquency_Amount))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(mean(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(median(Delinquency_Amount, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(mean(Delinquency_Amount, na.rm= TRUE))
 
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Delinquency_Amount))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Delinquency_Amount))
-
-
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Delinquency_Amount))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Delinquency_Amount))
-
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Years_Delinquent))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Delinquency_Amount, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Delinquency_Amoun, na.rm= TRUEt))
 
 
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Years_Delinquent))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Delinquency_Amount, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Delinquency_Amount, na.rm= TRUE))
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Years_Delinquent, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Years_Delinquent, na.rm= TRUE))
+
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Years_Delinquent, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Years_Delinquent, na.rm= TRUE))
 
 ```
 
 
 ```{r}
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(median(Delinquency_Amount))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(mean(Delinquency_Amount))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(median(Delinquency_Amount, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% summarize(mean(Delinquency_Amount, na.rm= TRUE))
 
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Delinquency_Amount))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Delinquency_Amount))
-
-
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Delinquency_Amount))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Delinquency_Amount))
-
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Years_Delinquent))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Delinquency_Amount, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Delinquency_Amount, na.rm= TRUE))
 
 
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Years_Delinquent))
-Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Years_Delinquent))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Delinquency_Amount, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Delinquency_Amount, na.rm= TRUE))
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(median(Years_Delinquent, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Years_Delinquent, na.rm= TRUE))
+
+
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(median(Years_Delinquent, na.rm= TRUE))
+Allen_data %>% filter(`Delinquency_Amount`>0) %>% filter(Gov_Foreclosure==0) %>% summarize(mean(Years_Delinquent, na.rm= TRUE))
 
 ```
 
@@ -2619,7 +2290,11 @@ When were these properties acquired or disposed?
 
 ```{r}
 ggplot(Montgomery_LB, aes(x=year(Date_Recorded_Or_Disposed), fill=Status))+
-         geom_bar()
+         geom_bar()+
+    labs(title="Land Bank Properties in Montgomery County", caption="Source: Montgomery County Land Bank public records request \n Graphic by Eye on Ohio, the Ohio Center for Journalism")+
+  xlab("Year")+
+  ylab("Number of Properties")+
+  theme_clean()
 ```
 
 
@@ -2643,7 +2318,7 @@ Note: 44 properties or 2.8% missing
 Montgomery_Properties_plotted <- leaflet(data = Montgomery_LB_Geo) %>% 
   addTiles() %>% 
   setView(-84.19014950126065,39.75795086894034, zoom = 10) %>% #Set to Dayton Center
-  addPolygons()
+  addPolygons(popup = paste("Parcel Number:",Montgomery_LB_Geo$TAXPINNO))
   
 Montgomery_Properties_plotted
 ```
@@ -2957,7 +2632,7 @@ Montgomery_data  <- Montgomery_data %>%
 
 
 
-To ask the auditor: Why do 573 of these 34,626 properties have a net delinquency of zero? (Two of which go to the Land bank?)
+573 of these 34,626 properties have a net delinquency of zero. Two of which go to the Land bank, so they may have been gifted.Land banks can of course accept gifted properties, but that's not what we are looking at in this project. 
 ```{r}
 Montgomery_data <- Montgomery_data %>% 
   filter(NETDELQ>0)
@@ -3058,7 +2733,7 @@ stack_glm <- stack_wf %>%
 # Print the fitted model
 stack_glm
 ```
-
+Net delinquency not very practically significant
 
 Next, we're going to build a decision tree model. 
 
@@ -3144,20 +2819,20 @@ Montgomery parcels
 ```{r}
 Montgomery_data %>% filter(Gov_Foreclosure==1) %>% nrow()
 
-Montgomery_data %>%  top_n(278, owed_as_a_percentage_of_lot_value) %>% summarize(sum(Gov_Foreclosure))
+Montgomery_data %>%  top_n(278, owed_as_a_percentage_of_lot_value) %>% summarize(sum(Gov_Foreclosure, na.rm=TRUE))
 
-Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(sum(Gov_Foreclosure))
+Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(sum(Gov_Foreclosure, na.rm=TRUE))
 
 ```
 
 How much did land bank parcels owe?
 
 ```{r}
-Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(NETDELQ))
-Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(NETDELQ))
+Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(NETDELQ, na.rm=TRUE))
+Montgomery_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(NETDELQ, na.rm=TRUE))
 
-Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(mean(NETDELQ))
-Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(median(NETDELQ))
+Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(mean(NETDELQ, na.rm=TRUE))
+Montgomery_data %>% top_n(278, NETDELQ) %>% summarize(median(NETDELQ, na.rm=TRUE))
 ```
 
 How many were still delinquent three years later?

@@ -89,7 +89,10 @@ ggplot(Franklin_LB, aes(x=`Property Class`, fill=`Actual Disposition`))+
 ```{r}
 ggplot(Franklin_LB, aes(x=`Acquisition Method`, fill=`Property Class`))+
   geom_bar()+
-  theme(axis.text.x = element_text(angle = 45, vjust = .9, hjust = .9))
+  theme(axis.text.x = element_text(angle = 45, vjust = .9, hjust = .9))+
+  ylab("Number of Properties")+
+  xlab("")+
+  labs(title = "Acquisition Method of Land Bank Properties in Franklin County", caption="Source: Public Records Act request- City of Columbus \n Graphic by Eye on Ohio, the Ohio Center for Journalism")
 ```
 
 
@@ -1803,6 +1806,7 @@ Adding them together
 ```{r}
 Athens_data <- left_join(Athens_data, Athens_Distance_Info1, by="Parcel")
 
+```
 
 ```{r}
 Athens_data %>% nrow()

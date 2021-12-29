@@ -5,8 +5,7 @@ This repository houses the code and files for these two articles:
 
 <b>How do public officials make Land Bank decisions? Artificial Intelligence may seek patterns</b> https://eyeonohio.com/how-do-public-officials-make-land-bank-decisions-artificial-intelligence-may-seek-patterns
 
-<b> [Not yet available] </b> (Link to come, this story is still embargoed.)
-
+<b> Plaintiff, Defendant, and Judge: How some Ohio counties entrust the same officials to collect taxes and wipe tax liens </b> https://eyeonohio.com/plaintiff-defendant-and-judge-how-some-ohio-counties-entrust-the-same-officials-to-collect-taxes-and-wipe-tax-liens/
 
 For a general explainer, see this article: <b> Sidebar: What is Artificial Intelligence and why use it to look at public records?</b> https://eyeonohio.com/sidebar-what-is-artificial-intelligence-and-why-use-it-to-look-at-public-records/
 

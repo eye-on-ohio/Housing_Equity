@@ -1822,8 +1822,8 @@ Allen_LB_Geo <- st_zm(Allen_LB_Geo, drop = T, what = "ZM")
 ```{r}
 Allen_Properties_plotted<- leaflet(data = Allen_LB_Geo) %>% 
   addTiles() %>% 
-  setView( -84.10603998384539, 40.73151049471383, zoom = 10) %>% #Set to Lima Center
-  addPolygons(data=Allen_LB_Geo$geometry, options = tileOptions(minZoom = 0, maxZoom = 14, continuousWorld = T), popup = Allen_LB_Geo$PARCEL)
+  setView( -84.10603998384539, 40.73151049471383, zoom = 11) %>% #Set to Lima Center
+  addPolygons(data=Allen_LB_Geo$geometry, options = tileOptions(minZoom = 0, maxZoom = 14, continuousWorld = T), popup = paste("Parcel Number:",Allen_LB_Geo$PARCEL))
   
 Allen_Properties_plotted
 ```

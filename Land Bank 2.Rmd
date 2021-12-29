@@ -1856,7 +1856,7 @@ stack_overflow <- as.data.frame(Athens_data)
 
 
 stack_overflow <- stack_overflow %>% 
-  filter(Amount>1470) %>% # Top Quarter
+  filter(Amount<1470) %>% # Top Quarter
     mutate(Gov_Foreclosure = factor(Gov_Foreclosure, levels = c(1,0))) %>%
     mutate_if(is.character, factor) %>% 
    mutate(Within_half_mile = factor(Within_half_mile, levels = c(1,0)))
@@ -2018,9 +2018,9 @@ Athens parcels
 ```{r}
 summary(Athens_data$Amount)
 
-Athens_data %>% filter(Gov_Foreclosure==1) %>% nrow()
+Athens_data %>% summarize(sum(Gov_Foreclosure))
 
-Athens_data %>% arrange(desc(Amount)) %>% top_n(115) %>% summarize(sum(Gov_Foreclosure))
+Athens_data %>%  top_n(115, Amount) %>% summarize(sum(Gov_Foreclosure, na.rm = ))
 
 
 
@@ -2029,14 +2029,14 @@ Athens_data %>% arrange(desc(Amount)) %>% top_n(115) %>% summarize(sum(Gov_Forec
 How much did land bank parcels owe?
 
 ```{r}
-Athens_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Amount))
-Athens_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(Amount))
+Athens_data %>% filter(Gov_Foreclosure==1) %>% summarize(mean(Amount, na.rm=TRUE))
+Athens_data %>% filter(Gov_Foreclosure==1) %>% summarize(median(Amount, na.rm=TRUE))
 
-Athens_data %>% top_n(Amount, 115) %>% summarize(mean(Amount))
-Athens_data %>% top_n(Amount, 115) %>% summarize(median(Amount))
+Athens_data %>% top_n(115, Amount) %>% summarize(mean(Amount, na.rm=TRUE))
+Athens_data %>% top_n(115, Amount) %>% summarize(median(Amount, na.rm=TRUE))
 
-Athens_data %>% filter(Amount>1470) %>% summarize(mean(Amount)) # Top Quarter
-Athens_data %>% filter(Amount>1470) %>% summarize(median(Amount))
+Athens_data %>% summarize(mean(Amount, na.rm=TRUE))
+Athens_data %>%  summarize(median(Amount, na.rm=TRUE))
 
 
 ```
